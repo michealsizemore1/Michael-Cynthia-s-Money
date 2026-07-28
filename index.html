@@ -31,6 +31,8 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ============================== CONSTANTS ============================== */
 
 const STORAGE_KEY = "meridian_money_data_v5";
+const ACTIVE_TAB_KEY = "meridian_money_active_tab";
+const VALID_TABS = ["dashboard", "budgets", "transactions", "subscriptions", "cashflow", "goals", "accounts"];
 
 const INVESTMENT_CATEGORY_META = {
   "US Stocks":            { color: "#4f46e5" },
@@ -1060,7 +1062,39 @@ function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose }) {
 
 /* ============================== DASHBOARD ============================== */
 
-function Dashboard({ data, derived }) {
+function SectionNotes({ section, data, actions }) {
+  const stored = (data.sectionNotes && data.sectionNotes[section]) || "";
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(stored);
+
+  const save = (val) => { setText(val); actions.setSectionNotes(section, val); };
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+      <button type="button" onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left">
+        <span className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+          📝 NOTES
+          {!open && text && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" title="Has notes"></span>}
+        </span>
+        <span className="text-xs text-amber-600 flex items-center gap-2">
+          auto-saved
+          <span className={"transition-transform inline-block " + (open ? "rotate-180" : "")}>▾</span>
+        </span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3">
+          <textarea
+            className="w-full bg-transparent text-sm text-amber-900 placeholder-amber-400 focus:outline-none resize-none"
+            rows={2} placeholder="Add a note for this section..."
+            value={text} onChange={e => save(e.target.value)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ data, derived, actions }) {
   const nwLabels = data.netWorthHistory.map(h => new Date(h.month + "-01T00:00:00").toLocaleDateString("en-US", { month: "short" }));
   const nwValues = data.netWorthHistory.map(h => h.netWorth);
 
@@ -1088,6 +1122,8 @@ function Dashboard({ data, derived }) {
         <h1 className="text-xl md:text-2xl font-bold text-slate-800">Good to see you, Michael &amp; Cynthia 👋</h1>
         <p className="text-slate-500 text-sm mt-1">Here's your financial overview for {new Date("2026-07-27").toLocaleDateString("en-US", { month: "long", year: "numeric" })}.</p>
       </div>
+
+      <SectionNotes section="dashboard" data={data} actions={actions} />
 
       {derived.budgetAlerts.length > 0 && (
         <Card className="p-4 border-amber-200 bg-amber-50/60">
@@ -1296,6 +1332,8 @@ function Budgets({ data, actions, derived }) {
           <div className="text-lg font-bold text-slate-800">{fmtCurrency(totalSpent, { decimals: false })} <span className="text-sm font-normal text-slate-400">/ {fmtCurrency(totalBudget, { decimals: false })}</span></div>
         </Card>
       </div>
+
+      <SectionNotes section="budgets" data={data} actions={actions} />
 
       {derived.budgetAlerts.length > 0 && (
         <Card className="p-4 border-amber-200 bg-amber-50/60">
@@ -2136,6 +2174,13 @@ function Transactions({ data, actions }) {
   const [limit, setLimit] = useState(40);
   const [viewingReceipt, setViewingReceipt] = useState(null);
   const [presetAccountId, setPresetAccountId] = useState(null);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+
+  const toggleExpand = (id) => setExpandedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const filtered = useMemo(() => {
     return data.transactions.filter(t => {
@@ -2171,6 +2216,8 @@ function Transactions({ data, actions }) {
         </div>
       </div>
 
+      <SectionNotes section="transactions" data={data} actions={actions} />
+
       <RulesPanel rules={data.rules} actions={actions} />
 
       <Card className="p-4 flex flex-wrap gap-3 items-center">
@@ -2193,47 +2240,75 @@ function Transactions({ data, actions }) {
       </Card>
 
       <Card className="overflow-hidden">
-        {/* Mobile: stacked cards */}
+        {/* Mobile: collapsible stacked cards */}
         <div className="divide-y divide-slate-100 md:hidden">
-          {filtered.slice(0, limit).map(t => (
-            <div key={t.id} className="px-5 py-4 hover:bg-slate-50 group">
-              <div className="flex items-center gap-2 mb-3">
-                <MerchantAvatar merchant={t.merchant} category={t.category} size={30} />
-                <span className="font-semibold text-slate-800">{t.merchant}</span>
-                {t.receipt && (
-                  <button type="button" title="View receipt" className="text-slate-400 hover:text-indigo-600" onClick={() => setViewingReceipt(t.receipt)}>📎</button>
+          {filtered.slice(0, limit).map(t => {
+            const isOpen = expandedIds.has(t.id);
+            return (
+              <div key={t.id}>
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(t.id)}
+                  className="w-full flex items-center justify-between gap-2 px-5 py-4 text-left hover:bg-slate-50"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <MerchantAvatar merchant={t.merchant} category={t.category} size={30} />
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                        {t.merchant}
+                        {t.receipt && <span title="Has receipt">📎</span>}
+                      </div>
+                      <div className="text-xs text-slate-400">{fmtDate(t.date)}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={"font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                      {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                    </span>
+                    <span className={"text-slate-400 inline-block transition-transform " + (isOpen ? "rotate-180" : "")}>▾</span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="px-5 pb-4">
+                    <div className="space-y-1.5 text-sm pl-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wide text-slate-400">Category</span>
+                        <Pill tone="slate">{t.category}</Pill>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wide text-slate-400">Person</span>
+                        <span className="text-slate-600">{PEOPLE_META[t.person || "Joint"].icon} {t.person || "Joint"}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wide text-slate-400">Account</span>
+                        <span className="text-slate-600">{accountsById[t.accountId]?.name || "—"}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wide text-slate-400">Date</span>
+                        <span className="text-slate-600">{fmtDate(t.date)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wide text-slate-400">Amount</span>
+                        <span className={"font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                          {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                        </span>
+                      </div>
+                      {t.receipt && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs uppercase tracking-wide text-slate-400">Receipt</span>
+                          <button type="button" className="text-indigo-600 text-xs font-medium" onClick={() => setViewingReceipt(t.receipt)}>View receipt</button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-4 mt-3 pt-3 border-t border-slate-50">
+                      <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(t)}>Edit</button>
+                      <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
+                    </div>
+                  </div>
                 )}
               </div>
-              <div className="space-y-1.5 text-sm pl-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wide text-slate-400">Category</span>
-                  <Pill tone="slate">{t.category}</Pill>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wide text-slate-400">Person</span>
-                  <span className="text-slate-600">{PEOPLE_META[t.person || "Joint"].icon} {t.person || "Joint"}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wide text-slate-400">Account</span>
-                  <span className="text-slate-600">{accountsById[t.accountId]?.name || "—"}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wide text-slate-400">Date</span>
-                  <span className="text-slate-600">{fmtDate(t.date)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wide text-slate-400">Amount</span>
-                  <span className={"font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
-                    {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
-                  </span>
-                </div>
-              </div>
-              <div className="flex gap-4 mt-3 pt-3 border-t border-slate-50 opacity-100 transition-opacity">
-                <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(t)}>Edit</button>
-                <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {filtered.length === 0 && (
             <div className="text-center py-10 text-slate-400">No transactions match your filters.</div>
           )}
@@ -2320,6 +2395,8 @@ function Subscriptions({ data, actions }) {
         <h1 className="text-xl md:text-2xl font-bold text-slate-800">Subscriptions &amp; Bills</h1>
         <p className="text-slate-500 text-sm mt-1">Recurring charges detected across your accounts.</p>
       </div>
+
+      <SectionNotes section="subscriptions" data={data} actions={actions} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
         <Card className="p-5">
@@ -2434,7 +2511,7 @@ function BillCalendar({ year, month, items, todayDay }) {
   );
 }
 
-function CashFlow({ data, derived }) {
+function CashFlow({ data, derived, actions }) {
   const todayDay = 27;
   const items = [
     ...derived.recurringItems.map(b => ({ merchant: b.merchant, amount: b.amount, dayOfMonth: b.dayOfMonth, income: false })),
@@ -2448,6 +2525,8 @@ function CashFlow({ data, derived }) {
         <h1 className="text-xl md:text-2xl font-bold text-slate-800">Cash Flow</h1>
         <p className="text-slate-500 text-sm mt-1">What's safe to spend before your next bills hit, and when everything is due.</p>
       </div>
+
+      <SectionNotes section="cashflow" data={data} actions={actions} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <Card className="p-6">
@@ -2554,6 +2633,8 @@ function Goals({ data, actions }) {
         </div>
         <Button className="self-start sm:self-auto" onClick={openAdd}>+ New Goal</Button>
       </div>
+
+      <SectionNotes section="goals" data={data} actions={actions} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
         {data.goals.map(g => {
@@ -2767,6 +2848,8 @@ function Accounts({ data, actions, derived }) {
         </div>
       </div>
 
+      <SectionNotes section="accounts" data={data} actions={actions} />
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5">
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Net Worth</div>
@@ -2846,10 +2929,16 @@ const TAB_LABELS = {
 
 function App() {
   const [data, setData] = useState(loadData);
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_TAB_KEY);
+      return VALID_TABS.includes(saved) ? saved : "dashboard";
+    } catch (e) { return "dashboard"; }
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => { saveData(data); }, [data]);
+  useEffect(() => { try { localStorage.setItem(ACTIVE_TAB_KEY, tab); } catch (e) {} }, [tab]);
 
   const derived = useDerived(data);
 
@@ -2885,6 +2974,7 @@ function App() {
 
     setCindyNotes: (text) => setData(d => ({ ...d, cindyRegisterNotes: text })),
     setRegisterNotes: (accountId, text) => setData(d => ({ ...d, registerNotes: { ...(d.registerNotes || {}), [accountId]: text } })),
+    setSectionNotes: (section, text) => setData(d => ({ ...d, sectionNotes: { ...(d.sectionNotes || {}), [section]: text } })),
   };
 
   return (
@@ -2896,11 +2986,11 @@ function App() {
           <div className="font-semibold text-slate-800 truncate">{TAB_LABELS[tab] || "Menu"}</div>
         </div>
         <main className="flex-1 overflow-y-auto">
-          {tab === "dashboard" && <Dashboard data={data} derived={derived} />}
+          {tab === "dashboard" && <Dashboard data={data} derived={derived} actions={actions} />}
           {tab === "budgets" && <Budgets data={data} actions={actions} derived={derived} />}
           {tab === "transactions" && <Transactions data={data} actions={actions} />}
           {tab === "subscriptions" && <Subscriptions data={data} actions={actions} />}
-          {tab === "cashflow" && <CashFlow data={data} derived={derived} />}
+          {tab === "cashflow" && <CashFlow data={data} derived={derived} actions={actions} />}
           {tab === "goals" && <Goals data={data} actions={actions} />}
           {tab === "accounts" && <Accounts data={data} actions={actions} derived={derived} />}
         </main>
