@@ -489,20 +489,21 @@ function generateSeedData() {
 const CINDY_CC_ACCOUNT_ID = "acc_cindy_cc";
 const CINDY_CC_ACCOUNT_NAME = "Cindy's Credit Card";
 const CINDY_PLACEHOLDER_NOTE = "Imported from retirement-planner-backup-2026-07-28.json";
-const CINDY_IMPORT_NOTE = "Imported from register-backup-2026-07-28.json";
+const CINDY_IMPORT_NOTE_V1 = "Imported from register-backup-2026-07-28.json";
+const CINDY_IMPORT_NOTE = "Imported from register-backup-2026-07-28.json (v2 - cleared status)";
 
 const CINDY_REGISTER_IMPORT = [
-    { date: "2026-07-26", merchant: "Albertsons", category: "Groceries", amount: -263.26, person: "Cynthia" },
-    { date: "2026-07-26", merchant: "Dillard's", category: "Shopping", amount: -63.55, person: "Cynthia" },
-    { date: "2026-07-26", merchant: "Half Priced Books", category: "Books", amount: -68.3, person: "Cynthia" },
-    { date: "2026-07-26", merchant: "Starbucks", category: "Dining & Coffee", amount: -15, person: "Cynthia" },
-    { date: "2026-07-25", merchant: "Albertsons", category: "Groceries", amount: -95.45, person: "Cynthia" },
-    { date: "2026-07-25", merchant: "Cabela's", category: "Shopping", amount: -69.09, person: "Cynthia" },
-    { date: "2026-07-25", merchant: "Costco", category: "Shopping", amount: -137.79, person: "Cynthia" },
-    { date: "2026-07-25", merchant: "Maverick", category: "Transportation", amount: -10, person: "Cynthia" },
+    { date: "2026-07-26", merchant: "Albertsons", category: "Groceries", amount: -263.26, person: "Cynthia", cleared: false },
+    { date: "2026-07-26", merchant: "Dillard's", category: "Shopping", amount: -63.55, person: "Cynthia", cleared: false },
+    { date: "2026-07-26", merchant: "Half Priced Books", category: "Books", amount: -68.3, person: "Cynthia", cleared: false },
+    { date: "2026-07-26", merchant: "Starbucks", category: "Dining & Coffee", amount: -15, person: "Cynthia", cleared: false },
+    { date: "2026-07-25", merchant: "Albertsons", category: "Groceries", amount: -95.45, person: "Cynthia", cleared: false },
+    { date: "2026-07-25", merchant: "Cabela's", category: "Shopping", amount: -69.09, person: "Cynthia", cleared: false },
+    { date: "2026-07-25", merchant: "Costco", category: "Shopping", amount: -137.79, person: "Cynthia", cleared: false },
+    { date: "2026-07-25", merchant: "Maverick", category: "Transportation", amount: -10, person: "Cynthia", cleared: false },
     { date: "2026-07-25", merchant: "TJ Maxx", category: "Shopping", amount: -50.85, person: "Cynthia" },
-    { date: "2026-07-25", merchant: "Starbucks", category: "Dining & Coffee", amount: -15, person: "Cynthia" },
-    { date: "2026-07-25", merchant: "Amazon", category: "Other", amount: -54.01, person: "Cynthia" },
+    { date: "2026-07-25", merchant: "Starbucks", category: "Dining & Coffee", amount: -15, person: "Cynthia", cleared: false },
+    { date: "2026-07-25", merchant: "Amazon", category: "Other", amount: -54.01, person: "Cynthia", cleared: false },
     { date: "2026-07-25", merchant: "Cabellla's", category: "Shopping", amount: -504, person: "Cynthia" },
     { date: "2026-07-23", merchant: "Starbucks", category: "Dining & Coffee", amount: -25, person: "Cynthia" },
     { date: "2026-07-22", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: 427.38, person: "Cynthia" },
@@ -602,10 +603,10 @@ const CINDY_REGISTER_IMPORT = [
 
 function buildCindyRegisterAdditions() {
   const balance = Math.round(CINDY_REGISTER_IMPORT.reduce((s, t) => s + t.amount, 0) * 100) / 100;
-  const account = { id: CINDY_CC_ACCOUNT_ID, name: CINDY_CC_ACCOUNT_NAME, institution: "ICCU", type: "credit", balance };
+  const account = { id: CINDY_CC_ACCOUNT_ID, name: CINDY_CC_ACCOUNT_NAME, institution: "ICCU", type: "credit", balance, openingBalance: 0 };
   const transactions = CINDY_REGISTER_IMPORT.map(t => ({
     id: uid(), date: t.date, accountId: CINDY_CC_ACCOUNT_ID, merchant: t.merchant,
-    category: t.category, amount: t.amount, notes: CINDY_IMPORT_NOTE, person: t.person,
+    category: t.category, amount: t.amount, notes: CINDY_IMPORT_NOTE, person: t.person, cleared: t.cleared !== false,
   }));
   return { account, transactions };
 }
@@ -619,8 +620,9 @@ function ensureCindyRegister(data) {
   const hasRealImport = transactions.some(t => t.notes === CINDY_IMPORT_NOTE);
   if (hasAccount && hasRealImport) return data; // already fully up to date
 
-  // Drop the earlier placeholder transactions (from the retirement-planner file) now that we have the real register.
-  transactions = transactions.filter(t => t.notes !== CINDY_PLACEHOLDER_NOTE);
+  // Drop the earlier placeholder transactions (from the retirement-planner file) and the v1 import
+  // (which didn't track cleared status) now that we have the real register with correct cleared flags.
+  transactions = transactions.filter(t => t.notes !== CINDY_PLACEHOLDER_NOTE && t.notes !== CINDY_IMPORT_NOTE_V1);
 
   const { account, transactions: importedTx } = buildCindyRegisterAdditions();
   accounts = hasAccount
@@ -637,6 +639,110 @@ function ensureCindyRegister(data) {
   return { ...data, accounts, transactions, budgets };
 }
 
+/* ---- Household bank registers (Cindy's Checking, Mike's Checking, Savings, HYSA) -------
+   Also imported from register-backup-2026-07-28.json (chkTxns, mikeTxns, savingsTxns,
+   hysaTxns + their opening balances). Money moving between the household's own accounts
+   (credit-card payments, spouse-to-spouse transfers, investment contributions) is tagged
+   category "Transfer" so it doesn't distort spending/income totals elsewhere in the app;
+   genuine paychecks/refunds are tagged "Income" and real purchases keep their real
+   category. */
+
+const CHK_ACCOUNT_ID = "acc_cindy_chk";
+const CHK_ACCOUNT_NAME = "Cindy's Checking";
+const MIKE_ACCOUNT_ID = "acc_mike_chk";
+const MIKE_ACCOUNT_NAME = "Mike's Checking";
+const SAVINGS_ACCOUNT_ID = "acc_household_savings";
+const SAVINGS_ACCOUNT_NAME = "Household Savings";
+const HYSA_ACCOUNT_ID = "acc_household_hysa";
+const HYSA_ACCOUNT_NAME = "Household HYSA";
+const HOUSEHOLD_IMPORT_NOTE = "Imported from register-backup-2026-07-28.json";
+
+const CHK_REGISTER_IMPORT = [
+    { date: "2026-07-01", merchant: "Deposit", category: "Income", amount: 1006.8, person: "Cynthia" },
+    { date: "2026-07-01", merchant: "Albertsons", category: "Groceries", amount: -71.72, person: "Cynthia" },
+    { date: "2026-07-02", merchant: "Cash Withdrawal", category: "Other", amount: -100, person: "Cynthia" },
+    { date: "2026-07-04", merchant: "Venmo", category: "Other", amount: -41.9, person: "Cynthia" },
+    { date: "2026-07-05", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -330.26, person: "Cynthia" },
+    { date: "2026-07-07", merchant: "Transfer from Mike", category: "Transfer", amount: 600, person: "Cynthia" },
+    { date: "2026-07-07", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -647.42, person: "Cynthia" },
+    { date: "2026-07-09", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -400, person: "Cynthia" },
+    { date: "2026-07-15", merchant: "Transfer from Mike", category: "Transfer", amount: 1188.23, person: "Cynthia" },
+    { date: "2026-07-15", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -388.23, person: "Cynthia" },
+    { date: "2026-07-17", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -293.25, person: "Cynthia" },
+    { date: "2026-07-18", merchant: "ATM Withdraw", category: "Other", amount: -60, person: "Cynthia" },
+    { date: "2026-07-18", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -197.21, person: "Cynthia" },
+    { date: "2026-07-20", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -200, person: "Cynthia" },
+    { date: "2026-07-20", merchant: "Transfer from Mike's Checking", category: "Transfer", amount: 375, person: "Cynthia" },
+    { date: "2026-07-20", merchant: "Transfer from HYSA", category: "Transfer", amount: 24.65, person: "Cynthia" },
+    { date: "2026-07-20", merchant: "Barnes & Noble", category: "Books", amount: -20.02, person: "Cynthia" },
+    { date: "2026-07-22", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -427.38, person: "Cynthia" },
+];
+
+const MIKE_REGISTER_IMPORT = [
+    { date: "2026-07-01", merchant: "Verizon Wireless", category: "Utilities", amount: -154.58, person: "Michael" },
+    { date: "2026-07-01", merchant: "Discovercard", category: "Other", amount: -58.22, person: "Michael" },
+    { date: "2026-07-01", merchant: "Trupanion", category: "Pets", amount: -41.42, person: "Michael" },
+    { date: "2026-07-09", merchant: "Best Buy Payment", category: "Transfer", amount: -84.79, person: "Michael" },
+    { date: "2026-07-09", merchant: "Best Buy Payment", category: "Transfer", amount: -100, person: "Michael" },
+    { date: "2026-07-11", merchant: "Trupanion", category: "Pets", amount: -39.08, person: "Michael" },
+    { date: "2026-07-13", merchant: "Trupanion Refund", category: "Income", amount: 3.01, person: "Michael" },
+    { date: "2026-07-14", merchant: "Cash Back Rewards (ICCU)", category: "Income", amount: 25, person: "Michael" },
+    { date: "2026-07-14", merchant: "M1 Finance SGOV", category: "Transfer", amount: -25, person: "Michael" },
+    { date: "2026-07-15", merchant: "Chase Payment", category: "Other", amount: -0.65, person: "Michael" },
+    { date: "2026-07-15", merchant: "Veterans Affairs Deposit", category: "Income", amount: 1624.36, person: "Michael" },
+    { date: "2026-07-15", merchant: "Transfer to Cindy", category: "Transfer", amount: -1188.23, person: "Michael" },
+    { date: "2026-07-16", merchant: "M1 Finance (All Things Bucket)", category: "Transfer", amount: -25, person: "Michael" },
+    { date: "2026-07-20", merchant: "Transfer to Cindy", category: "Transfer", amount: -375, person: "Michael" },
+    { date: "2026-07-22", merchant: "Transfer from Savings", category: "Transfer", amount: 25, person: "Michael" },
+    { date: "2026-07-22", merchant: "Transfer to M1", category: "Transfer", amount: -25, person: "Michael" },
+];
+
+const HYSA_REGISTER_IMPORT = [
+    { date: "2026-07-18", merchant: "ICCU Payment", category: "Transfer", amount: -447.36, person: "Joint" },
+    { date: "2026-07-20", merchant: "ICCU Credit Card Payment", category: "Transfer", amount: -777.57, person: "Joint" },
+    { date: "2026-07-20", merchant: "Transfer to Cindy", category: "Transfer", amount: -24.65, person: "Joint" },
+];
+
+function buildHouseholdRegisterAdditions() {
+  function build(id, name, type, opening, imports) {
+    const balance = Math.round((opening + imports.reduce((s, t) => s + t.amount, 0)) * 100) / 100;
+    const account = { id, name, institution: "ICCU", type, balance, openingBalance: opening };
+    const transactions = imports.map(t => ({
+      id: uid(), date: t.date, accountId: id, merchant: t.merchant, category: t.category,
+      amount: t.amount, notes: HOUSEHOLD_IMPORT_NOTE, person: t.person, cleared: true,
+    }));
+    return { account, transactions };
+  }
+  const chk = build(CHK_ACCOUNT_ID, CHK_ACCOUNT_NAME, "checking", 0, CHK_REGISTER_IMPORT);
+  const mike = build(MIKE_ACCOUNT_ID, MIKE_ACCOUNT_NAME, "checking", 441.31, MIKE_REGISTER_IMPORT);
+  const savings = build(SAVINGS_ACCOUNT_ID, SAVINGS_ACCOUNT_NAME, "savings", 25.18, []);
+  const hysa = build(HYSA_ACCOUNT_ID, HYSA_ACCOUNT_NAME, "savings", 7249.58, HYSA_REGISTER_IMPORT);
+  return {
+    accounts: [chk.account, mike.account, savings.account, hysa.account],
+    transactions: [...chk.transactions, ...mike.transactions, ...savings.transactions, ...hysa.transactions],
+  };
+}
+
+function ensureHouseholdRegisters(data) {
+  let accounts = data.accounts || [];
+  let transactions = data.transactions || [];
+
+  const householdIds = [CHK_ACCOUNT_ID, MIKE_ACCOUNT_ID, SAVINGS_ACCOUNT_ID, HYSA_ACCOUNT_ID];
+  const hasAllAccounts = householdIds.every(id => accounts.some(a => a.id === id));
+  const hasImport = transactions.some(t => t.notes === HOUSEHOLD_IMPORT_NOTE);
+  if (hasAllAccounts && hasImport) return data; // already fully up to date
+
+  const { accounts: newAccounts, transactions: newTx } = buildHouseholdRegisterAdditions();
+  newAccounts.forEach(na => {
+    if (!accounts.some(a => a.id === na.id)) accounts = [...accounts, na];
+  });
+  if (!hasImport) {
+    transactions = [...newTx, ...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
+  }
+
+  return { ...data, accounts, transactions };
+}
+
 function loadData() {
   let data = null;
   try {
@@ -645,6 +751,7 @@ function loadData() {
   } catch (e) {}
   if (!data) data = generateSeedData();
   data = ensureCindyRegister(data);
+  data = ensureHouseholdRegisters(data);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   return data;
 }
@@ -1376,6 +1483,641 @@ function RulesPanel({ rules, actions }) {
   );
 }
 
+/* ============================== CINDY'S CREDIT CARD REGISTER ============================== */
+
+function cindyRegType(t) {
+  if (t.amount > 0) return t.category === "Transfer" ? "payment" : "return";
+  return "expense";
+}
+
+const CINDY_TYPE_META = {
+  expense: { label: "Expense", short: "Exp", tone: "red" },
+  return:  { label: "Return",  short: "Ret", tone: "green" },
+  payment: { label: "Payment", short: "Pay", tone: "indigo" },
+};
+
+function RegStat({ label, value, tone }) {
+  const tones = {
+    rose: "bg-rose-50 text-rose-700 border-rose-100",
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-100",
+    indigo: "bg-indigo-50 text-indigo-700 border-indigo-100",
+    slate: "bg-slate-50 text-slate-700 border-slate-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-100",
+    sky: "bg-sky-50 text-sky-700 border-sky-100",
+  };
+  return (
+    <div className={"rounded-xl border p-3 " + (tones[tone] || tones.slate)}>
+      <div className="text-[11px] uppercase tracking-wide font-medium opacity-70">{label}</div>
+      <div className="text-base font-bold mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function CindyCreditCardRegister({ data, actions, cindyAccount }) {
+  const blankForm = { id: null, date: isoDate(2026, 7, 27), desc: "", amount: "", category: EXPENSE_CATEGORIES[0], regType: "expense", who: "Cynthia", receipt: null };
+  const [form, setForm] = useState(blankForm);
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [unclearedFirst, setUnclearedFirst] = useState(false);
+  const [notes, setNotes] = useState(data.cindyRegisterNotes || "");
+  const [viewingReceipt, setViewingReceipt] = useState(null);
+
+  const allTx = useMemo(() => data.transactions.filter(t => t.accountId === cindyAccount.id), [data.transactions, cindyAccount.id]);
+
+  const applyBalance = (nextList) => {
+    const bal = Math.round(nextList.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    actions.updateAccount({ ...cindyAccount, balance: bal });
+  };
+
+  const balanceById = useMemo(() => {
+    const chron = [...allTx].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    let running = 0;
+    const map = {};
+    chron.forEach(t => { running += -t.amount; map[t.id] = Math.round(running * 100) / 100; });
+    return map;
+  }, [allTx]);
+
+  const clearedExpenses = allTx.filter(t => t.cleared !== false && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const clearedReturns = allTx.filter(t => t.cleared !== false && t.amount > 0 && t.category !== "Transfer").reduce((s, t) => s + t.amount, 0);
+  const clearedPayments = allTx.filter(t => t.cleared !== false && t.amount > 0 && t.category === "Transfer").reduce((s, t) => s + t.amount, 0);
+  const totalOwed = -allTx.reduce((s, t) => s + t.amount, 0);
+  const unclearedCharges = allTx.filter(t => t.cleared === false && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const unclearedReturns = allTx.filter(t => t.cleared === false && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+
+  const filtered = useMemo(() => {
+    return allTx.filter(t => {
+      if (search && !t.merchant.toLowerCase().includes(search.toLowerCase())) return false;
+      if (catFilter !== "All" && t.category !== catFilter) return false;
+      if (typeFilter !== "All" && cindyRegType(t) !== typeFilter) return false;
+      if (fromDate && t.date < fromDate) return false;
+      if (toDate && t.date > toDate) return false;
+      return true;
+    });
+  }, [allTx, search, catFilter, typeFilter, fromDate, toDate]);
+
+  const sorted = useMemo(() => {
+    const byDateDesc = [...filtered].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    if (!unclearedFirst) return byDateDesc;
+    return [...byDateDesc.filter(t => t.cleared === false), ...byDateDesc.filter(t => t.cleared !== false)];
+  }, [filtered, unclearedFirst]);
+
+  const resetForm = () => setForm(blankForm);
+
+  const startEdit = (t) => {
+    setForm({
+      id: t.id, date: t.date, desc: t.merchant, amount: String(Math.abs(t.amount)),
+      category: t.category === "Transfer" ? EXPENSE_CATEGORIES[0] : t.category,
+      regType: cindyRegType(t), who: t.person || "Cynthia", receipt: t.receipt || null,
+    });
+  };
+
+  const submit = () => {
+    const amt = parseFloat(form.amount);
+    if (!form.desc.trim() || isNaN(amt) || amt <= 0 || !form.date) return;
+    const category = form.regType === "payment" ? "Transfer" : form.category;
+    const amount = form.regType === "expense" ? -Math.abs(amt) : Math.abs(amt);
+    const existing = form.id ? allTx.find(t => t.id === form.id) : null;
+    const payload = {
+      id: form.id || uid(), date: form.date, accountId: cindyAccount.id, merchant: form.desc.trim(),
+      category, amount, person: form.who, notes: existing ? (existing.notes || "") : "",
+      cleared: existing ? existing.cleared : false, receipt: form.receipt || null,
+    };
+    if (form.id) {
+      actions.updateTransaction(payload);
+      applyBalance(allTx.map(t => t.id === payload.id ? payload : t));
+    } else {
+      actions.addTransaction(payload);
+      applyBalance([...allTx, payload]);
+    }
+    resetForm();
+  };
+
+  const toggleCleared = (t) => actions.updateTransaction({ ...t, cleared: t.cleared === false ? true : false });
+
+  const removeTx = (id) => {
+    if (!window.confirm("Delete this transaction?")) return;
+    actions.deleteTransaction(id);
+    applyBalance(allTx.filter(t => t.id !== id));
+    if (form.id === id) resetForm();
+  };
+
+  const clearAll = () => {
+    if (!window.confirm(`Mark all ${allTx.length} transactions as cleared?`)) return;
+    allTx.forEach(t => { if (t.cleared === false) actions.updateTransaction({ ...t, cleared: true }); });
+  };
+
+  const saveNotes = (val) => { setNotes(val); actions.setCindyNotes(val); };
+
+  const attachReceipt = async (file) => {
+    if (!file) return;
+    try { const dataUrl = await fileToCompressedDataUrl(file); setForm(f => ({ ...f, receipt: dataUrl })); } catch (e) {}
+  };
+
+  const clearFilters = () => { setSearch(""); setCatFilter("All"); setTypeFilter("All"); setFromDate(""); setToDate(""); };
+  const accountsById = { [cindyAccount.id]: cindyAccount };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white p-5 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center text-xl shrink-0">💳</div>
+          <div>
+            <div className="font-bold text-lg leading-tight">Cindy's Credit Card Register</div>
+            <div className="text-xs text-indigo-100">{cindyAccount.name} · {cindyAccount.institution}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-indigo-100 uppercase tracking-wide">Total Owed</div>
+          <div className="text-2xl font-bold">{fmtCurrency(totalOwed, { decimals: false })}</div>
+        </div>
+      </div>
+
+      <div className="p-4 md:p-5 space-y-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 md:gap-3">
+          <RegStat label="Cleared Expenses" value={fmtCurrency(clearedExpenses)} tone="rose" />
+          <RegStat label="Cleared Returns" value={fmtCurrency(clearedReturns)} tone="emerald" />
+          <RegStat label="Cleared Payments" value={fmtCurrency(clearedPayments)} tone="indigo" />
+          <RegStat label="Total Owed" value={fmtCurrency(totalOwed, { decimals: false })} tone="slate" />
+          <RegStat label="Uncleared Charges" value={fmtCurrency(unclearedCharges)} tone="amber" />
+          <RegStat label="Uncleared Returns" value={fmtCurrency(unclearedReturns)} tone="sky" />
+        </div>
+
+        <div className="border border-slate-200 rounded-xl p-3 md:p-4">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{form.id ? "Edit Transaction" : "Add Transaction"}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+            <input type="date" className={inputClass} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            <input placeholder="Description" className={inputClass + " col-span-2 md:col-span-2"} value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} />
+            <input type="number" step="0.01" min="0" placeholder="$0.00" className={inputClass} value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            <select className={inputClass} disabled={form.regType === "payment"} value={form.regType === "payment" ? "Transfer" : form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+              {(form.regType === "payment" ? ["Transfer"] : EXPENSE_CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="flex items-center gap-1">
+              <button type="button" title="Attach receipt" className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 shrink-0" onClick={() => document.getElementById("cindy-receipt-input").click()}>📎</button>
+              <input id="cindy-receipt-input" type="file" accept="image/*" className="hidden" onChange={e => attachReceipt(e.target.files[0])} />
+              {form.receipt && <button type="button" className="text-xs text-indigo-600" onClick={() => setViewingReceipt(form.receipt)}>view</button>}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 mt-3">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
+              {["expense", "return", "payment"].map(rt => (
+                <button
+                  key={rt} type="button"
+                  onClick={() => setForm(f => ({ ...f, regType: rt }))}
+                  className={"px-3 py-2 " + (form.regType === rt
+                    ? (rt === "expense" ? "bg-rose-600 text-white" : rt === "return" ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white")
+                    : "bg-white text-slate-500 hover:bg-slate-50")}
+                >{CINDY_TYPE_META[rt].label.toUpperCase()}</button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
+              {[{ v: "Michael", label: "🧔 ME" }, { v: "Cynthia", label: "👩 WIFE" }, { v: "Joint", label: "🤝 JOINT" }].map(opt => (
+                <button
+                  key={opt.v} type="button"
+                  onClick={() => setForm(f => ({ ...f, who: opt.v }))}
+                  className={"px-3 py-2 " + (form.who === opt.v ? "bg-slate-800 text-white" : "bg-white text-slate-500 hover:bg-slate-50")}
+                >{opt.label}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              {form.id && <button type="button" className="text-xs text-slate-500 font-medium" onClick={resetForm}>Cancel</button>}
+              <Button className="text-xs px-4 py-2" onClick={submit}>{form.id ? "Update" : "+ Add"}</Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-center">
+          <input placeholder="Search description..." className={inputClass + " max-w-[180px]"} value={search} onChange={e => setSearch(e.target.value)} />
+          <select className={inputClass + " max-w-[160px]"} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+            <option value="All">All Categories</option>
+            {EXPENSE_CATEGORIES.concat(["Transfer"]).map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select className={inputClass + " max-w-[140px]"} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+            <option value="All">All Types</option>
+            <option value="expense">Expense</option>
+            <option value="return">Return</option>
+            <option value="payment">Payment</option>
+          </select>
+          <input type="date" className={inputClass + " max-w-[150px]"} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <span className="text-xs text-slate-400">to</span>
+          <input type="date" className={inputClass + " max-w-[150px]"} value={toDate} onChange={e => setToDate(e.target.value)} />
+          {(search || catFilter !== "All" || typeFilter !== "All" || fromDate || toDate) && (
+            <button className="text-xs text-indigo-600 font-medium" onClick={clearFilters}>Clear</button>
+          )}
+          <Button variant="secondary" className="text-xs px-3 py-1.5 ml-auto" onClick={() => exportTransactionsCSV(sorted, accountsById)}>⬇ Export CSV</Button>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-amber-800">📝 NOTES</span>
+            <span className="text-xs text-amber-600">auto-saved</span>
+          </div>
+          <textarea
+            className="w-full bg-transparent text-sm text-amber-900 placeholder-amber-400 focus:outline-none resize-none"
+            rows={2} placeholder="Add a note for this register..."
+            value={notes} onChange={e => saveNotes(e.target.value)}
+          />
+        </div>
+
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="text-sm font-semibold text-slate-700">Transactions <span className="text-slate-400 font-normal">({sorted.length})</span></div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setUnclearedFirst(u => !u)}
+              className={"text-xs font-medium px-3 py-1.5 rounded-lg border " + (unclearedFirst ? "bg-amber-100 border-amber-300 text-amber-800" : "border-slate-200 text-slate-500 hover:bg-slate-50")}
+            >⚠ Uncleared First</button>
+            <button className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50" onClick={clearAll}>Clear All</button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto border border-slate-100 rounded-xl">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+              <tr>
+                <th className="text-left px-3 py-3 font-medium w-8"></th>
+                <th className="text-left px-3 py-3 font-medium">Date</th>
+                <th className="text-left px-3 py-3 font-medium">Description</th>
+                <th className="text-left px-3 py-3 font-medium">Category</th>
+                <th className="text-left px-3 py-3 font-medium">Type</th>
+                <th className="text-right px-3 py-3 font-medium">Balance</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(t => {
+                const rt = cindyRegType(t);
+                const isCleared = t.cleared !== false;
+                const debtAmount = rt === "expense" ? Math.abs(t.amount) : -Math.abs(t.amount);
+                return (
+                  <tr key={t.id} className={"border-t border-slate-100 hover:bg-slate-50 group " + (isCleared ? "" : "bg-amber-50/40")}>
+                    <td className="px-3 py-3">
+                      <input type="checkbox" checked={isCleared} onChange={() => toggleCleared(t)} title={isCleared ? "Cleared" : "Uncleared"} className="w-4 h-4 accent-indigo-600" />
+                    </td>
+                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap">{fmtDateShort(t.date)}</td>
+                    <td className="px-3 py-3 font-medium text-slate-700">
+                      <div className="flex items-center gap-2">
+                        <MerchantAvatar merchant={t.merchant} category={t.category} size={24} />
+                        <div>
+                          <div>{t.merchant}</div>
+                          <div className={"text-xs font-semibold " + (debtAmount > 0 ? "text-rose-600" : "text-emerald-600")}>
+                            {debtAmount > 0 ? "+" : "-"}{fmtCurrency(Math.abs(debtAmount))}
+                          </div>
+                        </div>
+                        {t.receipt && (
+                          <button type="button" title="View receipt" className="text-slate-400 hover:text-indigo-600" onClick={() => setViewingReceipt(t.receipt)}>📎</button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3"><Pill tone="slate">{t.category}</Pill></td>
+                    <td className="px-3 py-3"><Pill tone={CINDY_TYPE_META[rt].tone}>{CINDY_TYPE_META[rt].short}</Pill></td>
+                    <td className="px-3 py-3 text-right font-semibold text-slate-700 whitespace-nowrap">{fmtCurrency(balanceById[t.id] ?? 0, { decimals: false })}</td>
+                    <td className="px-3 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      <button className="text-slate-400 hover:text-indigo-600 mr-2" title="Edit" onClick={() => startEdit(t)}>✏️</button>
+                      <button className="text-slate-400 hover:text-rose-500" title="Delete" onClick={() => removeTx(t.id)}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && (
+                <tr><td colSpan="7" className="text-center py-10 text-slate-400">No transactions match your filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Modal open={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title="Receipt">
+        {viewingReceipt && <img src={viewingReceipt} className="w-full rounded-lg" alt="Receipt" />}
+      </Modal>
+    </Card>
+  );
+}
+
+/* ============================== BANK ACCOUNT REGISTER (Checking / Savings / HYSA) ============================== */
+
+function defaultPersonForAccount(accountId) {
+  if (accountId === CHK_ACCOUNT_ID) return "Cynthia";
+  if (accountId === MIKE_ACCOUNT_ID) return "Michael";
+  return "Joint";
+}
+
+function BankAccountRegister({ data, actions, account }) {
+  const blankForm = { id: null, date: isoDate(2026, 7, 27), desc: "", amount: "", category: "Other", direction: "withdrawal", receipt: null };
+  const [form, setForm] = useState(blankForm);
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("All");
+  const [dirFilter, setDirFilter] = useState("All");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [unclearedFirst, setUnclearedFirst] = useState(false);
+  const [notes, setNotes] = useState((data.registerNotes && data.registerNotes[account.id]) || "");
+  const [viewingReceipt, setViewingReceipt] = useState(null);
+
+  const opening = account.openingBalance || 0;
+  const allTx = useMemo(() => data.transactions.filter(t => t.accountId === account.id), [data.transactions, account.id]);
+
+  const applyBalance = (nextList) => {
+    const bal = Math.round((opening + nextList.reduce((s, t) => s + t.amount, 0)) * 100) / 100;
+    actions.updateAccount({ ...account, balance: bal });
+  };
+
+  const balanceById = useMemo(() => {
+    const chron = [...allTx].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    let running = opening;
+    const map = {};
+    chron.forEach(t => { running += t.amount; map[t.id] = Math.round(running * 100) / 100; });
+    return map;
+  }, [allTx, opening]);
+
+  const clearedDeposits = allTx.filter(t => t.cleared !== false && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const clearedWithdrawals = allTx.filter(t => t.cleared !== false && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const availableBalance = Math.round((opening + allTx.filter(t => t.cleared !== false).reduce((s, t) => s + t.amount, 0)) * 100) / 100;
+  const totalBalance = Math.round((opening + allTx.reduce((s, t) => s + t.amount, 0)) * 100) / 100;
+  const unclearedDeposits = allTx.filter(t => t.cleared === false && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const unclearedWithdrawals = allTx.filter(t => t.cleared === false && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  const filtered = useMemo(() => {
+    return allTx.filter(t => {
+      if (search && !t.merchant.toLowerCase().includes(search.toLowerCase())) return false;
+      if (catFilter !== "All" && t.category !== catFilter) return false;
+      if (dirFilter !== "All" && (t.amount > 0 ? "deposit" : "withdrawal") !== dirFilter) return false;
+      if (fromDate && t.date < fromDate) return false;
+      if (toDate && t.date > toDate) return false;
+      return true;
+    });
+  }, [allTx, search, catFilter, dirFilter, fromDate, toDate]);
+
+  const sorted = useMemo(() => {
+    const byDateDesc = [...filtered].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    if (!unclearedFirst) return byDateDesc;
+    return [...byDateDesc.filter(t => t.cleared === false), ...byDateDesc.filter(t => t.cleared !== false)];
+  }, [filtered, unclearedFirst]);
+
+  const resetForm = () => setForm(blankForm);
+
+  const startEdit = (t) => {
+    setForm({
+      id: t.id, date: t.date, desc: t.merchant, amount: String(Math.abs(t.amount)),
+      category: t.category, direction: t.amount > 0 ? "deposit" : "withdrawal", receipt: t.receipt || null,
+    });
+  };
+
+  const submit = () => {
+    const amt = parseFloat(form.amount);
+    if (!form.desc.trim() || isNaN(amt) || amt <= 0 || !form.date) return;
+    const amount = form.direction === "deposit" ? Math.abs(amt) : -Math.abs(amt);
+    const existing = form.id ? allTx.find(t => t.id === form.id) : null;
+    const payload = {
+      id: form.id || uid(), date: form.date, accountId: account.id, merchant: form.desc.trim(),
+      category: form.category, amount, person: existing ? (existing.person || defaultPersonForAccount(account.id)) : defaultPersonForAccount(account.id),
+      notes: existing ? (existing.notes || "") : "", cleared: existing ? existing.cleared : false, receipt: form.receipt || null,
+    };
+    if (form.id) {
+      actions.updateTransaction(payload);
+      applyBalance(allTx.map(t => t.id === payload.id ? payload : t));
+    } else {
+      actions.addTransaction(payload);
+      applyBalance([...allTx, payload]);
+    }
+    resetForm();
+  };
+
+  const toggleCleared = (t) => actions.updateTransaction({ ...t, cleared: t.cleared === false ? true : false });
+
+  const removeTx = (id) => {
+    if (!window.confirm("Delete this transaction?")) return;
+    actions.deleteTransaction(id);
+    applyBalance(allTx.filter(t => t.id !== id));
+    if (form.id === id) resetForm();
+  };
+
+  const clearAll = () => {
+    if (!window.confirm(`Mark all ${allTx.length} transactions as cleared?`)) return;
+    allTx.forEach(t => { if (t.cleared === false) actions.updateTransaction({ ...t, cleared: true }); });
+  };
+
+  const saveNotes = (val) => { setNotes(val); actions.setRegisterNotes(account.id, val); };
+
+  const attachReceipt = async (file) => {
+    if (!file) return;
+    try { const dataUrl = await fileToCompressedDataUrl(file); setForm(f => ({ ...f, receipt: dataUrl })); } catch (e) {}
+  };
+
+  const clearFilters = () => { setSearch(""); setCatFilter("All"); setDirFilter("All"); setFromDate(""); setToDate(""); };
+  const accountsById = { [account.id]: account };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="bg-gradient-to-r from-teal-600 to-indigo-600 text-white p-5 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center text-xl shrink-0">{ACCOUNT_TYPE_META[account.type].icon}</div>
+          <div>
+            <div className="font-bold text-lg leading-tight">{account.name}</div>
+            <div className="text-xs text-teal-100">{account.name} · {account.institution}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-teal-100 uppercase tracking-wide">Balance</div>
+          <div className="text-2xl font-bold">{fmtCurrency(totalBalance, { decimals: false })}</div>
+        </div>
+      </div>
+
+      <div className="p-4 md:p-5 space-y-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 md:gap-3">
+          <RegStat label="Cleared Deposits" value={fmtCurrency(clearedDeposits)} tone="emerald" />
+          <RegStat label="Cleared Withdrawals" value={fmtCurrency(clearedWithdrawals)} tone="rose" />
+          <RegStat label="Available Balance" value={fmtCurrency(availableBalance, { decimals: false })} tone="indigo" />
+          <RegStat label="Total Balance" value={fmtCurrency(totalBalance, { decimals: false })} tone="slate" />
+          <RegStat label="Uncleared Deposits" value={fmtCurrency(unclearedDeposits)} tone="sky" />
+          <RegStat label="Uncleared Withdrawals" value={fmtCurrency(unclearedWithdrawals)} tone="amber" />
+        </div>
+
+        <div className="border border-slate-200 rounded-xl p-3 md:p-4">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{form.id ? "Edit Transaction" : "Add Transaction"}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+            <input type="date" className={inputClass} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            <input placeholder="Description" className={inputClass + " col-span-2 md:col-span-2"} value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} />
+            <input type="number" step="0.01" min="0" placeholder="$0.00" className={inputClass} value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            <select className={inputClass} value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+              {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="flex items-center gap-1">
+              <button type="button" title="Attach receipt" className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 shrink-0" onClick={() => document.getElementById("bank-receipt-input-" + account.id).click()}>📎</button>
+              <input id={"bank-receipt-input-" + account.id} type="file" accept="image/*" className="hidden" onChange={e => attachReceipt(e.target.files[0])} />
+              {form.receipt && <button type="button" className="text-xs text-indigo-600" onClick={() => setViewingReceipt(form.receipt)}>view</button>}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 mt-3">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
+              {["withdrawal", "deposit"].map(d => (
+                <button
+                  key={d} type="button"
+                  onClick={() => setForm(f => ({ ...f, direction: d }))}
+                  className={"px-3 py-2 " + (form.direction === d
+                    ? (d === "withdrawal" ? "bg-rose-600 text-white" : "bg-emerald-600 text-white")
+                    : "bg-white text-slate-500 hover:bg-slate-50")}
+                >{d === "withdrawal" ? "WITHDRAWAL" : "DEPOSIT"}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              {form.id && <button type="button" className="text-xs text-slate-500 font-medium" onClick={resetForm}>Cancel</button>}
+              <Button className="text-xs px-4 py-2" onClick={submit}>{form.id ? "Update" : "+ Add"}</Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-center">
+          <input placeholder="Search description..." className={inputClass + " max-w-[180px]"} value={search} onChange={e => setSearch(e.target.value)} />
+          <select className={inputClass + " max-w-[160px]"} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+            <option value="All">All Categories</option>
+            {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select className={inputClass + " max-w-[140px]"} value={dirFilter} onChange={e => setDirFilter(e.target.value)}>
+            <option value="All">All Types</option>
+            <option value="deposit">Deposit</option>
+            <option value="withdrawal">Withdrawal</option>
+          </select>
+          <input type="date" className={inputClass + " max-w-[150px]"} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <span className="text-xs text-slate-400">to</span>
+          <input type="date" className={inputClass + " max-w-[150px]"} value={toDate} onChange={e => setToDate(e.target.value)} />
+          {(search || catFilter !== "All" || dirFilter !== "All" || fromDate || toDate) && (
+            <button className="text-xs text-indigo-600 font-medium" onClick={clearFilters}>Clear</button>
+          )}
+          <Button variant="secondary" className="text-xs px-3 py-1.5 ml-auto" onClick={() => exportTransactionsCSV(sorted, accountsById)}>⬇ Export CSV</Button>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-amber-800">📝 NOTES</span>
+            <span className="text-xs text-amber-600">auto-saved</span>
+          </div>
+          <textarea
+            className="w-full bg-transparent text-sm text-amber-900 placeholder-amber-400 focus:outline-none resize-none"
+            rows={2} placeholder="Add a note for this register..."
+            value={notes} onChange={e => saveNotes(e.target.value)}
+          />
+        </div>
+
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="text-sm font-semibold text-slate-700">Transactions <span className="text-slate-400 font-normal">({sorted.length})</span></div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setUnclearedFirst(u => !u)}
+              className={"text-xs font-medium px-3 py-1.5 rounded-lg border " + (unclearedFirst ? "bg-amber-100 border-amber-300 text-amber-800" : "border-slate-200 text-slate-500 hover:bg-slate-50")}
+            >⚠ Uncleared First</button>
+            <button className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50" onClick={clearAll}>Clear All</button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto border border-slate-100 rounded-xl">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+              <tr>
+                <th className="text-left px-3 py-3 font-medium w-8"></th>
+                <th className="text-left px-3 py-3 font-medium">Date</th>
+                <th className="text-left px-3 py-3 font-medium">Description</th>
+                <th className="text-left px-3 py-3 font-medium">Category</th>
+                <th className="text-left px-3 py-3 font-medium">Type</th>
+                <th className="text-right px-3 py-3 font-medium">Balance</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(t => {
+                const isCleared = t.cleared !== false;
+                const isDeposit = t.amount > 0;
+                return (
+                  <tr key={t.id} className={"border-t border-slate-100 hover:bg-slate-50 group " + (isCleared ? "" : "bg-amber-50/40")}>
+                    <td className="px-3 py-3">
+                      <input type="checkbox" checked={isCleared} onChange={() => toggleCleared(t)} title={isCleared ? "Cleared" : "Uncleared"} className="w-4 h-4 accent-indigo-600" />
+                    </td>
+                    <td className="px-3 py-3 text-slate-500 whitespace-nowrap">{fmtDateShort(t.date)}</td>
+                    <td className="px-3 py-3 font-medium text-slate-700">
+                      <div className="flex items-center gap-2">
+                        <MerchantAvatar merchant={t.merchant} category={t.category} size={24} />
+                        <div>
+                          <div>{t.merchant}</div>
+                          <div className={"text-xs font-semibold " + (isDeposit ? "text-emerald-600" : "text-rose-600")}>
+                            {isDeposit ? "+" : "-"}{fmtCurrency(Math.abs(t.amount))}
+                          </div>
+                        </div>
+                        {t.receipt && (
+                          <button type="button" title="View receipt" className="text-slate-400 hover:text-indigo-600" onClick={() => setViewingReceipt(t.receipt)}>📎</button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3"><Pill tone="slate">{t.category}</Pill></td>
+                    <td className="px-3 py-3"><Pill tone={isDeposit ? "green" : "red"}>{isDeposit ? "Deposit" : "Withdrawal"}</Pill></td>
+                    <td className="px-3 py-3 text-right font-semibold text-slate-700 whitespace-nowrap">{fmtCurrency(balanceById[t.id] ?? 0, { decimals: false })}</td>
+                    <td className="px-3 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      <button className="text-slate-400 hover:text-indigo-600 mr-2" title="Edit" onClick={() => startEdit(t)}>✏️</button>
+                      <button className="text-slate-400 hover:text-rose-500" title="Delete" onClick={() => removeTx(t.id)}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && (
+                <tr><td colSpan="7" className="text-center py-10 text-slate-400">No transactions match your filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Modal open={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title="Receipt">
+        {viewingReceipt && <img src={viewingReceipt} className="w-full rounded-lg" alt="Receipt" />}
+      </Modal>
+    </Card>
+  );
+}
+
+/* ============================== ACCOUNTS & CARDS TAB SWITCHER ============================== */
+
+function AccountsAndCards({ data, actions }) {
+  const [activeTab, setActiveTab] = useState("cc");
+
+  const ccAccount = data.accounts.find(a => a.id === CINDY_CC_ACCOUNT_ID || a.name === CINDY_CC_ACCOUNT_NAME);
+  const chkAccount = data.accounts.find(a => a.id === CHK_ACCOUNT_ID);
+  const mikeAccount = data.accounts.find(a => a.id === MIKE_ACCOUNT_ID);
+  const savingsAccount = data.accounts.find(a => a.id === SAVINGS_ACCOUNT_ID);
+  const hysaAccount = data.accounts.find(a => a.id === HYSA_ACCOUNT_ID);
+
+  const tabs = [
+    { key: "cc", label: "💳 Credit Card", account: ccAccount, kind: "credit" },
+    { key: "chk", label: "🏦 Cindy's Checking", account: chkAccount, kind: "bank" },
+    { key: "mike", label: "🏦 Mike's Checking", account: mikeAccount, kind: "bank" },
+    { key: "savings", label: "🐷 Savings", account: savingsAccount, kind: "bank" },
+    { key: "hysa", label: "💰 HYSA", account: hysaAccount, kind: "bank" },
+  ].filter(t => t.account);
+
+  if (tabs.length === 0) return null;
+  const active = tabs.find(t => t.key === activeTab) || tabs[0];
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-lg md:text-xl font-bold text-slate-800">🗂️ Accounts &amp; Cards</h2>
+        <p className="text-sm text-slate-500 mt-0.5">Your household transaction registers — credit card, both checking accounts, savings, and the HYSA.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {tabs.map(t => (
+          <button
+            key={t.key} onClick={() => setActiveTab(t.key)}
+            className={"text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors " + (active.key === t.key ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 hover:bg-slate-50")}
+          >{t.label}</button>
+        ))}
+      </div>
+      {active.kind === "credit"
+        ? <CindyCreditCardRegister data={data} actions={actions} cindyAccount={active.account} />
+        : <BankAccountRegister data={data} actions={actions} account={active.account} />}
+    </div>
+  );
+}
+
 function Transactions({ data, actions }) {
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
@@ -1398,12 +2140,6 @@ function Transactions({ data, actions }) {
   }, [data.transactions, search, catFilter, acctFilter, personFilter]);
 
   const accountsById = Object.fromEntries(data.accounts.map(a => [a.id, a]));
-
-  const cindyAccount = data.accounts.find(a => a.id === CINDY_CC_ACCOUNT_ID || a.name === CINDY_CC_ACCOUNT_NAME);
-  const cindyTx = useMemo(() => {
-    if (!cindyAccount) return [];
-    return data.transactions.filter(t => t.accountId === cindyAccount.id).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [data.transactions, cindyAccount]);
 
   const openAdd = (accountId) => { setEditing(null); setPresetAccountId(accountId || null); setModalOpen(true); };
   const openEdit = (t) => { setEditing(t); setPresetAccountId(null); setModalOpen(true); };
@@ -1500,60 +2236,7 @@ function Transactions({ data, actions }) {
         )}
       </Card>
 
-      {cindyAccount && (
-        <Card className="overflow-hidden">
-          <div className="p-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100">
-            <div>
-              <h3 className="font-semibold text-slate-700">💳 Cindy's Credit Card Register</h3>
-              <p className="text-xs text-slate-400 mt-0.5">A dedicated register for {cindyAccount.name}, imported from the retirement-planner backup.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="text-sm">
-                <span className="text-slate-400">Balance </span>
-                <span className="font-semibold text-rose-600">{fmtCurrency(cindyAccount.balance)}</span>
-              </div>
-              <Button className="text-xs px-3 py-1.5" onClick={() => openAdd(cindyAccount.id)}>+ Add Charge</Button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left px-5 py-3 font-medium">Merchant</th>
-                  <th className="text-left px-5 py-3 font-medium">Category</th>
-                  <th className="text-left px-5 py-3 font-medium">Date</th>
-                  <th className="text-right px-5 py-3 font-medium">Amount</th>
-                  <th className="px-5 py-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {cindyTx.map(t => (
-                  <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50 group">
-                    <td className="px-5 py-3 font-medium text-slate-700">
-                      <div className="flex items-center gap-2">
-                        <MerchantAvatar merchant={t.merchant} category={t.category} size={26} />
-                        <span>{t.merchant}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3"><Pill tone="slate">{t.category}</Pill></td>
-                    <td className="px-5 py-3 text-slate-500">{fmtDate(t.date)}</td>
-                    <td className={"px-5 py-3 text-right font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
-                      {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
-                    </td>
-                    <td className="px-5 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                      <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openEdit(t)}>Edit</button>
-                      <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-                {cindyTx.length === 0 && (
-                  <tr><td colSpan="5" className="text-center py-8 text-slate-400">No charges on this register yet.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+      <AccountsAndCards data={data} actions={actions} />
 
       <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} accounts={data.accounts} rules={data.rules} defaultAccountId={presetAccountId} />
 
@@ -2141,7 +2824,10 @@ function App() {
       }),
     })),
 
-    resetDemo: () => { setData(ensureCindyRegister(generateSeedData())); },
+    resetDemo: () => { setData(ensureHouseholdRegisters(ensureCindyRegister(generateSeedData()))); },
+
+    setCindyNotes: (text) => setData(d => ({ ...d, cindyRegisterNotes: text })),
+    setRegisterNotes: (accountId, text) => setData(d => ({ ...d, registerNotes: { ...(d.registerNotes || {}), [accountId]: text } })),
   };
 
   return (
