@@ -71,6 +71,26 @@ const CATEGORY_META = {
 
 const EXPENSE_CATEGORIES = Object.keys(CATEGORY_META).filter(c => c !== "Income" && c !== "Transfer");
 
+// Custom, user-added categories don't have a built-in icon/color — these helpers fall back gracefully
+// wherever a category name might not be a key in CATEGORY_META.
+function categoryColor(cat) { return (CATEGORY_META[cat] && CATEGORY_META[cat].color) || "#64748b"; }
+function categoryIconOf(cat) { return (CATEGORY_META[cat] && CATEGORY_META[cat].icon) || "🏷️"; }
+
+// Built-in expense categories plus any user-added custom categories, alphabetized.
+function allExpenseCategories(data) {
+  const custom = (data && data.customCategories) || [];
+  const set = new Set([...EXPENSE_CATEGORIES, ...custom]);
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+// Every category (expense, Income, Transfer) plus custom ones, alphabetized — for registers
+// like checking/savings where a transaction could be any of those.
+function allCategoriesFull(data) {
+  const custom = (data && data.customCategories) || [];
+  const set = new Set([...Object.keys(CATEGORY_META), ...custom]);
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 const ACCOUNT_TYPE_META = {
   checking:   { icon: "🏦", label: "Checking" },
   savings:    { icon: "🐷", label: "Savings" },
@@ -632,7 +652,7 @@ function generateSeedData() {
     { month: "2026-04", netWorth: 31150 },
     { month: "2026-05", netWorth: 32080 },
     { month: "2026-06", netWorth: 33240 },
-    { month: "2026-07", netWorth: accounts.reduce((s, a) => s + a.balance, 0) },
+    { month: "2026-07", netWorth: accounts.filter(a => a.type !== "checking").reduce((s, a) => s + a.balance, 0) },
   ];
 
   const goals = [
@@ -642,7 +662,7 @@ function generateSeedData() {
     { id: uid(), name: "Pay Off Credit Card", icon: "💳", target: 1284, current: 380, deadline: "2026-11-01", color: "#ec4899" },
   ];
 
-  return { accounts, transactions, budgets: { ...DEFAULT_BUDGETS }, subscriptions, goals, netWorthHistory, recurringBills, rules, investments };
+  return { accounts, transactions, budgets: { ...DEFAULT_BUDGETS }, subscriptions, goals, netWorthHistory, recurringBills, rules, investments, paidBills: {}, customCategories: [] };
 }
 
 // A genuinely blank slate — no fictional accounts, transactions, subscriptions, goals,
@@ -650,7 +670,7 @@ function generateSeedData() {
 // the Michael & Cynthia sample dataset lingers; the real imported registers are re-applied
 // on top of this by ensureCindyRegister/ensureHouseholdRegisters right after.
 function emptyData() {
-  return { accounts: [], transactions: [], budgets: {}, subscriptions: [], goals: [], netWorthHistory: [], recurringBills: [], rules: [], investments: [] };
+  return { accounts: [], transactions: [], budgets: {}, subscriptions: [], goals: [], netWorthHistory: [], recurringBills: [], rules: [], investments: [], paidBills: {}, customCategories: [] };
 }
 
 /* ---- Cindy's Credit Card Register -------------------------------------
@@ -1011,6 +1031,53 @@ function Button({ children, onClick, variant, className, type, disabled }) {
   );
 }
 
+function AddCategoryButton({ data, actions, onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+
+  const openModal = () => { setName(""); setError(""); setOpen(true); };
+  const close = () => setOpen(false);
+
+  const save = () => {
+    const trimmed = name.trim();
+    if (!trimmed) { setError("Enter a category name."); return; }
+    const existing = allExpenseCategories(data).map(c => c.toLowerCase());
+    if (existing.includes(trimmed.toLowerCase())) { setError("That category already exists."); return; }
+    actions.addCategory(trimmed);
+    setOpen(false);
+    if (onAdded) onAdded(trimmed);
+  };
+
+  return (
+    <React.Fragment>
+      <button
+        type="button"
+        title="Add a new category"
+        onClick={openModal}
+        className="w-8 h-8 shrink-0 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-indigo-600 flex items-center justify-center text-sm font-bold"
+      >+</button>
+      <Modal open={open} onClose={close} title="Add Category">
+        <Field label="Category name">
+          <input
+            autoFocus
+            placeholder="e.g. Kids' Activities"
+            className={inputClass}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") save(); }}
+          />
+        </Field>
+        {error && <p className="text-sm text-rose-600 mb-3">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={close}>Cancel</Button>
+          <Button onClick={save}>Add Category</Button>
+        </div>
+      </Modal>
+    </React.Fragment>
+  );
+}
+
 /* ============================== CHARTS ============================== */
 
 function LineChartCanvas({ labels, values, height }) {
@@ -1097,7 +1164,10 @@ function BarChartCanvas({ labels, values, color, height }) {
 
 function useDerived(data) {
   return useMemo(() => {
-    const netWorth = data.accounts.reduce((s, a) => s + a.balance, 0);
+    // Checking accounts are excluded from Net Worth — they're spending/cash-flow accounts,
+    // not a store of wealth, per user preference.
+    const netWorthAccounts = data.accounts.filter(a => a.type !== "checking");
+    const netWorth = netWorthAccounts.reduce((s, a) => s + a.balance, 0);
     const totalAssets = data.accounts.filter(a => a.balance > 0).reduce((s, a) => s + a.balance, 0);
     const totalDebt = data.accounts.filter(a => a.balance < 0).reduce((s, a) => s + Math.abs(a.balance), 0);
 
@@ -1129,11 +1199,12 @@ function useDerived(data) {
 
     // Safe to spend — checking balance minus bills/subscriptions still due this month
     const todayDay = now.getDate();
+    const paidForMonth = (data.paidBills && data.paidBills[curMonth]) || {};
     const recurringItems = [
-      ...(data.recurringBills || []),
-      ...data.subscriptions.filter(s => s.active).map(s => ({ merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category })),
+      ...(data.recurringBills || []).map(b => ({ ...b, paid: !!paidForMonth[b.id] })),
+      ...data.subscriptions.filter(s => s.active).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category, paid: !!paidForMonth[s.id] })),
     ];
-    const upcomingBillsRemaining = recurringItems.filter(b => b.dayOfMonth > todayDay).reduce((s, b) => s + b.amount, 0);
+    const upcomingBillsRemaining = recurringItems.filter(b => b.dayOfMonth > todayDay && !b.paid).reduce((s, b) => s + b.amount, 0);
     const checkingAccount = data.accounts.find(a => a.type === "checking");
     const safeToSpend = (checkingAccount ? checkingAccount.balance : 0) - upcomingBillsRemaining;
 
@@ -1177,7 +1248,7 @@ function useDerived(data) {
 
 /* ============================== SIDEBAR ============================== */
 
-function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose }) {
+function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose, sectionNotes }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: "📊" },
     { id: "budgets", label: "Budgets", icon: "🎯" },
@@ -1215,16 +1286,21 @@ function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose }) {
           <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white text-xl leading-none px-1">&times;</button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {items.map(it => (
-            <button
-              key={it.id}
-              onClick={() => selectTab(it.id)}
-              className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors " +
-                (tab === it.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800")}
-            >
-              <span>{it.icon}</span>{it.label}
-            </button>
-          ))}
+          {items.map(it => {
+            const hasNote = !!(sectionNotes && sectionNotes[it.id] && String(sectionNotes[it.id]).trim());
+            return (
+              <button
+                key={it.id}
+                onClick={() => selectTab(it.id)}
+                className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors " +
+                  (tab === it.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800")}
+              >
+                <span>{it.icon}</span>
+                <span className="flex-1 text-left">{it.label}</span>
+                {hasNote && <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="Has a saved note"></span>}
+              </button>
+            );
+          })}
         </nav>
         <div className="px-5 py-5 border-t border-slate-800">
           <div className="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Net Worth</div>
@@ -1276,7 +1352,7 @@ function Dashboard({ data, derived, actions }) {
   const catEntries = Object.entries(derived.spendByCategory).sort((a, b) => b[1] - a[1]);
   const catLabels = catEntries.map(e => e[0]);
   const catValues = catEntries.map(e => e[1]);
-  const catColors = catLabels.map(c => CATEGORY_META[c].color);
+  const catColors = catLabels.map(c => categoryColor(c));
 
   const recentTx = [...data.transactions].slice(0, 6);
   const upcomingBills = derived.recurringItems
@@ -1358,7 +1434,7 @@ function Dashboard({ data, derived, actions }) {
                 <div className="mt-3 space-y-1.5 max-h-28 overflow-y-auto no-scrollbar">
                   {catEntries.slice(0, 5).map(([cat, amt]) => (
                     <div key={cat} className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full inline-block" style={{ background: CATEGORY_META[cat].color }}></span>{cat}</span>
+                      <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full inline-block" style={{ background: categoryColor(cat) }}></span>{cat}</span>
                       <span className="font-medium text-slate-700">{fmtCurrency(amt)}</span>
                     </div>
                   ))}
@@ -1875,7 +1951,7 @@ function CindyCreditCardRegister({ data, actions, cindyAccount }) {
             <input placeholder="Description" className={inputClass + " col-span-2 md:col-span-2"} value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} />
             <input type="number" step="0.01" min="0" placeholder="$0.00" className={inputClass} value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
             <select className={inputClass} disabled={form.regType === "payment"} value={form.regType === "payment" ? "Transfer" : form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-              {(form.regType === "payment" ? ["Transfer"] : EXPENSE_CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
+              {(form.regType === "payment" ? ["Transfer"] : allExpenseCategories(data)).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <div className="flex items-center gap-1">
               <button type="button" title="Attach receipt" className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 shrink-0" onClick={() => document.getElementById("cindy-receipt-input").click()}>📎</button>
@@ -1916,8 +1992,9 @@ function CindyCreditCardRegister({ data, actions, cindyAccount }) {
           <input placeholder="Search description..." className={inputClass + " max-w-[180px]"} value={search} onChange={e => setSearch(e.target.value)} />
           <select className={inputClass + " max-w-[160px]"} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
             <option value="All">All Categories</option>
-            {EXPENSE_CATEGORIES.concat(["Transfer"]).map(c => <option key={c} value={c}>{c}</option>)}
+            {allExpenseCategories(data).concat(["Transfer"]).map(c => <option key={c} value={c}>{c}</option>)}
           </select>
+          <AddCategoryButton data={data} actions={actions} />
           <select className={inputClass + " max-w-[140px]"} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
             <option value="All">All Types</option>
             <option value="expense">Expense</option>
@@ -2167,7 +2244,7 @@ function BankAccountRegister({ data, actions, account }) {
             <input placeholder="Description" className={inputClass + " col-span-2 md:col-span-2"} value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} />
             <input type="number" step="0.01" min="0" placeholder="$0.00" className={inputClass} value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
             <select className={inputClass} value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
-              {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+              {allCategoriesFull(data).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <div className="flex items-center gap-1">
               <button type="button" title="Attach receipt" className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 shrink-0" onClick={() => document.getElementById("bank-receipt-input-" + account.id).click()}>📎</button>
@@ -2199,8 +2276,9 @@ function BankAccountRegister({ data, actions, account }) {
           <input placeholder="Search description..." className={inputClass + " max-w-[180px]"} value={search} onChange={e => setSearch(e.target.value)} />
           <select className={inputClass + " max-w-[160px]"} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
             <option value="All">All Categories</option>
-            {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+            {allCategoriesFull(data).map(c => <option key={c} value={c}>{c}</option>)}
           </select>
+          <AddCategoryButton data={data} actions={actions} />
           <select className={inputClass + " max-w-[140px]"} value={dirFilter} onChange={e => setDirFilter(e.target.value)}>
             <option value="All">All Types</option>
             <option value="deposit">Deposit</option>
@@ -2919,7 +2997,7 @@ function Subscriptions({ data, actions }) {
 
 /* ============================== CASH FLOW ============================== */
 
-function BillCalendar({ year, month, items, todayDay }) {
+function BillCalendar({ year, month, items, todayDay, onDayClick }) {
   const dim = daysInMonth(year, month);
   const firstWeekday = new Date(year, month - 1, 1).getDay();
   const cells = [];
@@ -2932,35 +3010,102 @@ function BillCalendar({ year, month, items, todayDay }) {
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 gap-1.5 md:gap-2 text-xs min-w-[560px]">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d} className="text-center font-medium text-slate-400 pb-1">{d}</div>)}
-        {cells.map((d, i) => (
-          <div key={i} className={"min-h-[76px] rounded-lg border p-1.5 " + (d === todayDay ? "border-indigo-400 bg-indigo-50" : "border-slate-100")}>
-            {d && <div className={"text-[11px] font-semibold " + (d === todayDay ? "text-indigo-600" : "text-slate-400")}>{d}</div>}
-            {d && (itemsByDay[d] || []).slice(0, 2).map((it, idx) => (
-              <div
-                key={idx}
-                title={it.merchant + " · " + fmtCurrency(it.amount)}
-                className={"mt-0.5 truncate rounded px-1 py-0.5 " + (it.income ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}
-              >
-                {it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant.split(" ")[0]}
-              </div>
-            ))}
-            {d && (itemsByDay[d] || []).length > 2 && (
-              <div className="text-[10px] text-slate-400 mt-0.5">+{itemsByDay[d].length - 2} more</div>
-            )}
-          </div>
-        ))}
+        {cells.map((d, i) => {
+          const dayItems = d ? (itemsByDay[d] || []) : [];
+          return (
+            <button
+              key={i}
+              type="button"
+              disabled={!d}
+              onClick={() => d && onDayClick(d, dayItems)}
+              className={"min-h-[84px] rounded-lg border p-1.5 text-left align-top block w-full " + (d ? "hover:border-indigo-300 hover:shadow-sm cursor-pointer transition-all " : "cursor-default ") + (d === todayDay ? "border-indigo-400 bg-indigo-50" : "border-slate-100")}
+            >
+              {d && <div className={"text-[11px] font-semibold " + (d === todayDay ? "text-indigo-600" : "text-slate-400")}>{d}</div>}
+              {d && dayItems.slice(0, 3).map((it, idx) => (
+                <div
+                  key={idx}
+                  title={it.merchant + " · " + fmtCurrency(it.amount) + (it.paid ? " · Paid" : "")}
+                  className={"mt-0.5 truncate rounded px-1 py-0.5 flex items-center gap-0.5 " + (it.income ? "bg-emerald-50 text-emerald-700" : it.paid ? "bg-slate-100 text-slate-400 line-through" : "bg-rose-50 text-rose-700")}
+                >
+                  {!it.income && it.paid && <span className="shrink-0">✓</span>}
+                  <span className="truncate">{it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant}</span>
+                </div>
+              ))}
+              {d && dayItems.length > 3 && (
+                <div className="text-[10px] text-slate-400 mt-0.5">+{dayItems.length - 3} more — tap to see all</div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
+function DayDetailModal({ open, onClose, day, items, monthKey, actions }) {
+  if (!day) return null;
+  const bills = items.filter(it => !it.income);
+  const income = items.filter(it => it.income);
+  const dateLabel = day ? new Date(2026, 6, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : "";
+  return (
+    <Modal open={open} onClose={onClose} title={dateLabel}>
+      <div className="space-y-4">
+        {items.length === 0 && <p className="text-sm text-slate-400">Nothing scheduled on this day.</p>}
+        {bills.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Bills &amp; Subscriptions</div>
+            <div className="space-y-2">
+              {bills.map((b, i) => (
+                <label key={b.id || i} className={"flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 cursor-pointer " + (b.paid ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200")}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={!!b.paid}
+                      onChange={() => b.id && actions.toggleBillPaid(monthKey, b.id)}
+                      className="w-4 h-4 accent-emerald-600 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className={"text-sm font-medium truncate " + (b.paid ? "text-slate-400 line-through" : "text-slate-700")}>{b.merchant}</div>
+                      {b.category && <div className="text-xs text-slate-400">{b.category}</div>}
+                    </div>
+                  </div>
+                  <div className={"text-sm font-semibold shrink-0 " + (b.paid ? "text-slate-400" : "text-rose-600")}>{fmtCurrency(b.amount)}</div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {income.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Income</div>
+            <div className="space-y-2">
+              {income.map((t, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2.5">
+                  <div className="text-sm font-medium text-slate-700 truncate">{t.merchant}</div>
+                  <div className="text-sm font-semibold text-emerald-600 shrink-0">+{fmtCurrency(t.amount)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function CashFlow({ data, derived, actions }) {
   const todayDay = 27;
+  const [selectedDay, setSelectedDay] = useState(null);
   const items = [
-    ...derived.recurringItems.map(b => ({ merchant: b.merchant, amount: b.amount, dayOfMonth: b.dayOfMonth, income: false })),
+    ...derived.recurringItems.map(b => ({ id: b.id, merchant: b.merchant, amount: b.amount, dayOfMonth: b.dayOfMonth, category: b.category, paid: b.paid, income: false })),
     ...derived.monthTx.filter(t => t.category === "Income").map(t => ({ merchant: t.merchant, amount: t.amount, dayOfMonth: new Date(t.date + "T00:00:00").getDate(), income: true })),
   ];
   const upcoming = derived.recurringItems.filter(b => b.dayOfMonth > todayDay).sort((a, b) => a.dayOfMonth - b.dayOfMonth);
+
+  // Recomputed live from `items` on every render (not a frozen snapshot), so the paid
+  // checkbox in the modal stays in sync immediately after toggling.
+  const selectedItems = selectedDay != null ? items.filter(it => it.dayOfMonth === selectedDay) : [];
+  const openDay = (day) => setSelectedDay(day);
 
   return (
     <div className="p-4 md:p-8 space-y-5 md:space-y-6">
@@ -2984,19 +3129,37 @@ function CashFlow({ data, derived, actions }) {
             <div className="space-y-2 max-h-56 overflow-y-auto no-scrollbar">
               {upcoming.length === 0 && <div className="text-sm text-slate-400">Nothing left — you're all paid up! 🎉</div>}
               {upcoming.map((b, i) => (
-                <div key={i} className="flex justify-between text-sm">
-                  <span className="text-slate-600">{b.merchant}</span>
-                  <span className="font-medium text-slate-700">{fmtCurrency(b.amount)}</span>
-                </div>
+                <label key={b.id || i} className="flex items-center justify-between gap-2 text-sm cursor-pointer">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={!!b.paid}
+                      onChange={() => b.id && actions.toggleBillPaid(derived.curMonth, b.id)}
+                      className="w-3.5 h-3.5 accent-emerald-600 shrink-0"
+                    />
+                    <span className={"truncate " + (b.paid ? "text-slate-400 line-through" : "text-slate-600")}>{b.merchant}</span>
+                  </span>
+                  <span className={"font-medium shrink-0 " + (b.paid ? "text-slate-400" : "text-slate-700")}>{fmtCurrency(b.amount)}</span>
+                </label>
               ))}
             </div>
           </div>
         </Card>
         <Card className="md:col-span-2 p-6">
           <h3 className="font-semibold text-slate-700 mb-3">July 2026 Bill Calendar</h3>
-          <BillCalendar year={2026} month={7} items={items} todayDay={todayDay} />
+          <p className="text-xs text-slate-400 -mt-2 mb-3">Tap any day to see full details and check off bills as paid.</p>
+          <BillCalendar year={2026} month={7} items={items} todayDay={todayDay} onDayClick={openDay} />
         </Card>
       </div>
+
+      <DayDetailModal
+        open={selectedDay != null}
+        onClose={() => setSelectedDay(null)}
+        day={selectedDay}
+        items={selectedItems}
+        monthKey={derived.curMonth}
+        actions={actions}
+      />
     </div>
   );
 }
@@ -3676,6 +3839,7 @@ function Settings({ data, actions }) {
   const [restoreError, setRestoreError] = useState("");
   const [restoreSuccess, setRestoreSuccess] = useState("");
   const [lastBackup, setLastBackup] = useState(() => { try { return localStorage.getItem(LAST_BACKUP_STORAGE) || ""; } catch (e) { return ""; } });
+  const [clearConfirmText, setClearConfirmText] = useState("");
   const fileInputRef = useRef(null);
 
   const handleBackup = () => {
@@ -3709,6 +3873,13 @@ function Settings({ data, actions }) {
 
   const resetDemo = () => {
     if (window.confirm("Clear the sample demo data (fictional accounts, transactions, budgets, goals, subscriptions)? Your real imported registers — Cindy's Credit Card, Cindy's Checking, Mike's Checking, Savings, and HYSA — will be kept, reset to their originally imported state. This can't be undone.")) actions.resetDemo();
+  };
+
+  const clearEverything = () => {
+    if (clearConfirmText.trim().toUpperCase() !== "DELETE") return;
+    if (!window.confirm("This will permanently erase EVERYTHING in this app — including your real accounts, transactions, budgets, goals, and subscriptions, not just the demo data. There is no undo unless you've downloaded a backup. Are you absolutely sure?")) return;
+    actions.clearAllData();
+    setClearConfirmText("");
   };
 
   return (
@@ -3747,6 +3918,22 @@ function Settings({ data, actions }) {
           <Button variant="secondary" onClick={resetDemo}>Reset Demo Data</Button>
         </div>
       </Card>
+
+      <Card className="p-5 border-2 border-rose-200">
+        <h3 className="font-semibold text-rose-700">🗑️ Clear All Data</h3>
+        <p className="text-sm text-slate-500 mt-1">
+          Permanently erase <span className="font-semibold text-rose-600">everything</span> in this app — including your real accounts, transactions, budgets, goals, subscriptions, rules, and notes, not just the demo data. This can't be undone, so download a backup first if you might want any of it later.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <input
+            placeholder='Type DELETE to confirm'
+            className={inputClass + " max-w-[200px]"}
+            value={clearConfirmText}
+            onChange={e => setClearConfirmText(e.target.value)}
+          />
+          <Button variant="danger" onClick={clearEverything} disabled={clearConfirmText.trim().toUpperCase() !== "DELETE"}>Clear All Data</Button>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -3780,6 +3967,14 @@ function App() {
     deleteTransaction: (id) => setData(d => ({ ...d, transactions: d.transactions.filter(x => x.id !== id) })),
     importTransactions: (arr) => setData(d => ({ ...d, transactions: [...arr, ...d.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)) })),
 
+    toggleBillPaid: (monthKey, id) => setData(d => {
+      const paidBills = { ...(d.paidBills || {}) };
+      const monthMap = { ...(paidBills[monthKey] || {}) };
+      monthMap[id] = !monthMap[id];
+      paidBills[monthKey] = monthMap;
+      return { ...d, paidBills };
+    }),
+
     setBudget: (cat, val) => setData(d => ({ ...d, budgets: { ...d.budgets, [cat]: val } })),
 
     toggleSubscription: (id) => setData(d => ({ ...d, subscriptions: d.subscriptions.map(s => s.id === id ? { ...s, active: !s.active } : s) })),
@@ -3807,6 +4002,17 @@ function App() {
 
     resetDemo: () => { setData(ensureHouseholdRegisters(ensureCindyRegister(emptyData()))); },
     restoreData: (newData) => { setData(ensureHouseholdRegisters(ensureCindyRegister(newData))); },
+    // Unlike resetDemo, this does NOT re-apply the real-register migrations — it's a genuinely blank slate,
+    // wiping the user's real imported data along with the demo content.
+    clearAllData: () => { setData(emptyData()); },
+
+    addCategory: (name) => setData(d => {
+      const trimmed = String(name || "").trim();
+      if (!trimmed) return d;
+      const existing = new Set([...EXPENSE_CATEGORIES, ...(d.customCategories || [])].map(c => c.toLowerCase()));
+      if (existing.has(trimmed.toLowerCase())) return d;
+      return { ...d, customCategories: [...(d.customCategories || []), trimmed] };
+    }),
 
     setCindyNotes: (text) => setData(d => ({ ...d, cindyRegisterNotes: text })),
     setRegisterNotes: (accountId, text) => setData(d => ({ ...d, registerNotes: { ...(d.registerNotes || {}), [accountId]: text } })),
@@ -3815,7 +4021,7 @@ function App() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar tab={tab} setTab={setTab} netWorth={derived.netWorth} mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
+      <Sidebar tab={tab} setTab={setTab} netWorth={derived.netWorth} mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} sectionNotes={data.sectionNotes} />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200 shrink-0">
           <button onClick={() => setMobileMenuOpen(true)} className="text-slate-600 text-2xl leading-none px-1" aria-label="Open menu">☰</button>
