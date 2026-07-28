@@ -132,6 +132,72 @@ function mulberry32(seed) {
   };
 }
 
+const MERCHANT_DOMAINS = {
+  "starbucks": "starbucks.com", "chipotle": "chipotle.com", "whole foods": "wholefoodsmarket.com",
+  "trader joe": "traderjoes.com", "safeway": "safeway.com", "kroger": "kroger.com", "costco": "costco.com",
+  "amazon": "amazon.com", "target": "target.com", "best buy": "bestbuy.com", "nike": "nike.com",
+  "home depot": "homedepot.com", "etsy": "etsy.com", "netflix": "netflix.com", "spotify": "spotify.com",
+  "disney": "disneyplus.com", "icloud": "apple.com", "new york times": "nytimes.com", "uber": "uber.com",
+  "lyft": "lyft.com", "shell": "shell.com", "chevron": "chevron.com", "doordash": "doordash.com",
+  "panera": "panerabread.com", "amc theatres": "amctheatres.com", "steam": "steampowered.com",
+  "ticketmaster": "ticketmaster.com", "great clips": "greatclips.com", "sephora": "sephora.com",
+  "cvs": "cvs.com", "planet fitness": "planetfitness.com", "xfinity": "xfinity.com", "toyota": "toyota.com",
+  "pacific gas": "pge.com", "venmo": "venmo.com", "chase": "chase.com", "ally bank": "ally.com",
+  "vanguard": "vanguard.com", "lucky strike": "bowlero.com", "usps": "usps.com",
+};
+
+function findMerchantDomain(merchant) {
+  if (!merchant) return null;
+  const lower = merchant.toLowerCase();
+  const key = Object.keys(MERCHANT_DOMAINS).find(k => lower.includes(k));
+  return key ? MERCHANT_DOMAINS[key] : null;
+}
+
+function MerchantAvatar({ merchant, category, size }) {
+  const [failed, setFailed] = useState(false);
+  const domain = findMerchantDomain(merchant);
+  const s = size || 36;
+  if (!domain || failed) {
+    return (
+      <div className="rounded-full bg-slate-100 flex items-center justify-center shrink-0" style={{ width: s, height: s, fontSize: s * 0.5 }}>
+        {(CATEGORY_META[category] && CATEGORY_META[category].icon) || "💵"}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?sz=64&domain=${domain}`}
+      onError={() => setFailed(true)}
+      className="rounded-full bg-white border border-slate-200 object-contain shrink-0"
+      style={{ width: s, height: s, padding: s * 0.15 }}
+      alt={merchant}
+    />
+  );
+}
+
+function fileToCompressedDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 640;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function estimateMinPayment(account) {
   if (account.type === "credit") return Math.max(35, Math.abs(account.balance) * 0.03);
   if (account.type === "loan") return 310;
@@ -866,9 +932,9 @@ function Dashboard({ data, derived }) {
             {recentTx.map(t => (
               <div key={t.id} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-base">{CATEGORY_META[t.category]?.icon || "💵"}</div>
+                  <MerchantAvatar merchant={t.merchant} category={t.category} size={36} />
                   <div>
-                    <div className="text-sm font-medium text-slate-700">{t.merchant}</div>
+                    <div className="text-sm font-medium text-slate-700">{t.merchant}{t.receipt ? " 📎" : ""}</div>
                     <div className="text-xs text-slate-400">{fmtDateShort(t.date)} · {t.category}</div>
                   </div>
                 </div>
@@ -998,8 +1064,9 @@ function Budgets({ data, actions, derived }) {
 /* ============================== TRANSACTIONS ============================== */
 
 function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
-  const blank = { date: "2026-07-27", accountId: accounts[0]?.id || "", merchant: "", category: "Other", amount: "", notes: "", person: "Joint" };
+  const blank = { date: "2026-07-27", accountId: accounts[0]?.id || "", merchant: "", category: "Other", amount: "", notes: "", person: "Joint", receipt: null };
   const [form, setForm] = useState(initial || blank);
+  const [receiptBusy, setReceiptBusy] = useState(false);
   useEffect(() => { setForm(initial || blank); }, [initial, open]);
 
   const onMerchantChange = (val) => {
@@ -1009,6 +1076,16 @@ function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
       if (match) next.category = match.category;
     }
     setForm(next);
+  };
+
+  const onReceiptChange = async (file) => {
+    if (!file) return;
+    setReceiptBusy(true);
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      setForm(f => ({ ...f, receipt: dataUrl }));
+    } catch (e) {}
+    setReceiptBusy(false);
   };
 
   const submit = (e) => {
@@ -1050,6 +1127,17 @@ function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
         </Field>
         <Field label="Notes (optional)">
           <input className={inputClass} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+        </Field>
+        <Field label="Receipt (optional)">
+          {form.receipt ? (
+            <div className="flex items-center gap-3">
+              <img src={form.receipt} className="w-16 h-16 object-cover rounded-lg border border-slate-200" alt="Receipt" />
+              <button type="button" className="text-xs text-rose-500 font-medium" onClick={() => setForm({ ...form, receipt: null })}>Remove</button>
+            </div>
+          ) : (
+            <input type="file" accept="image/*" className="text-sm" onChange={e => onReceiptChange(e.target.files[0])} />
+          )}
+          {receiptBusy && <div className="text-xs text-slate-400 mt-1">Processing image…</div>}
         </Field>
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
@@ -1111,6 +1199,7 @@ function Transactions({ data, actions }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [limit, setLimit] = useState(40);
+  const [viewingReceipt, setViewingReceipt] = useState(null);
 
   const filtered = useMemo(() => {
     return data.transactions.filter(t => {
@@ -1183,8 +1272,14 @@ function Transactions({ data, actions }) {
           <tbody>
             {filtered.slice(0, limit).map(t => (
               <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50 group">
-                <td className="px-5 py-3 font-medium text-slate-700 flex items-center gap-2">
-                  <span>{CATEGORY_META[t.category]?.icon}</span>{t.merchant}
+                <td className="px-5 py-3 font-medium text-slate-700">
+                  <div className="flex items-center gap-2">
+                    <MerchantAvatar merchant={t.merchant} category={t.category} size={26} />
+                    <span>{t.merchant}</span>
+                    {t.receipt && (
+                      <button type="button" title="View receipt" className="text-slate-400 hover:text-indigo-600" onClick={() => setViewingReceipt(t.receipt)}>📎</button>
+                    )}
+                  </div>
                 </td>
                 <td className="px-5 py-3"><Pill tone="slate">{t.category}</Pill></td>
                 <td className="px-5 py-3 text-slate-500">{PEOPLE_META[t.person || "Joint"].icon} {t.person || "Joint"}</td>
@@ -1212,6 +1307,10 @@ function Transactions({ data, actions }) {
       </Card>
 
       <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} accounts={data.accounts} rules={data.rules} />
+
+      <Modal open={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title="Receipt">
+        {viewingReceipt && <img src={viewingReceipt} className="w-full rounded-lg" alt="Receipt" />}
+      </Modal>
     </div>
   );
 }
