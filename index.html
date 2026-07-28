@@ -32,7 +32,7 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 const STORAGE_KEY = "meridian_money_data_v5";
 const ACTIVE_TAB_KEY = "meridian_money_active_tab";
-const VALID_TABS = ["dashboard", "budgets", "transactions", "subscriptions", "cashflow", "goals", "accounts", "ai"];
+const VALID_TABS = ["dashboard", "budgets", "transactions", "subscriptions", "cashflow", "goals", "accounts", "ai", "settings"];
 
 const INVESTMENT_CATEGORY_META = {
   "US Stocks":            { color: "#4f46e5" },
@@ -1079,6 +1079,7 @@ function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose }) {
     { id: "goals", label: "Goals", icon: "🏆" },
     { id: "accounts", label: "Accounts", icon: "🏛️" },
     { id: "ai", label: "AI Assistant", icon: "✨" },
+    { id: "settings", label: "Settings", icon: "⚙️" },
   ];
 
   const selectTab = (id) => {
@@ -2903,10 +2904,6 @@ function Accounts({ data, actions, derived }) {
     setModalOpen(false);
   };
 
-  const resetDemo = () => {
-    if (confirm("Clear the sample demo data (fictional accounts, transactions, budgets, goals, subscriptions)? Your real imported registers — Cindy's Credit Card, Cindy's Checking, Mike's Checking, Savings, and HYSA — will be kept, reset to their originally imported state. This can't be undone.")) actions.resetDemo();
-  };
-
   const assetAccounts = data.accounts.filter(a => a.balance >= 0);
   const debtAccounts = data.accounts.filter(a => a.balance < 0);
 
@@ -2918,7 +2915,6 @@ function Accounts({ data, actions, derived }) {
           <p className="text-slate-500 text-sm mt-1">Manually managed — link states are simulated for this demo.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={resetDemo}>Reset Demo Data</Button>
           <Button className="flex-1 sm:flex-none" onClick={openAdd}>+ Add Account</Button>
         </div>
       </div>
@@ -3291,12 +3287,109 @@ function AIAssistant({ data, actions, derived }) {
   );
 }
 
+/* ============================== SETTINGS (BACKUP & RESTORE) ============================== */
+
+const LAST_BACKUP_STORAGE = "meridian_money_last_backup";
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function isPlausibleBackup(obj) {
+  const d = obj && obj.data ? obj.data : obj;
+  return !!d && Array.isArray(d.accounts) && Array.isArray(d.transactions);
+}
+
+function Settings({ data, actions }) {
+  const [restoreError, setRestoreError] = useState("");
+  const [restoreSuccess, setRestoreSuccess] = useState("");
+  const [lastBackup, setLastBackup] = useState(() => { try { return localStorage.getItem(LAST_BACKUP_STORAGE) || ""; } catch (e) { return ""; } });
+  const fileInputRef = useRef(null);
+
+  const handleBackup = () => {
+    const envelope = { app: "Michael & Cynthia's Money", version: 1, exportedAt: new Date().toISOString(), data };
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadJSON(envelope, `michael-cynthia-money-backup-${stamp}.json`);
+    try { localStorage.setItem(LAST_BACKUP_STORAGE, new Date().toISOString()); } catch (e) {}
+    setLastBackup(new Date().toISOString());
+  };
+
+  const openFilePicker = () => { setRestoreError(""); setRestoreSuccess(""); fileInputRef.current && fileInputRef.current.click(); };
+
+  const handleFile = (file) => {
+    if (!file) return;
+    setRestoreError(""); setRestoreSuccess("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try { parsed = JSON.parse(reader.result); }
+      catch (e) { setRestoreError("That file isn't valid JSON — make sure you're selecting a backup exported from this app."); return; }
+      if (!isPlausibleBackup(parsed)) { setRestoreError("That file doesn't look like a Michael & Cynthia's Money backup (missing accounts/transactions)."); return; }
+      const restored = parsed.data ? parsed.data : parsed;
+      const exportedAt = parsed.exportedAt ? new Date(parsed.exportedAt).toLocaleString() : "an unknown date";
+      if (!window.confirm(`Restore this backup from ${exportedAt}? This will replace everything currently in the app — all accounts, transactions, budgets, goals, and subscriptions. This can't be undone.`)) return;
+      actions.restoreData(restored);
+      setRestoreSuccess(`Restored backup from ${exportedAt}.`);
+    };
+    reader.onerror = () => setRestoreError("Couldn't read that file.");
+    reader.readAsText(file);
+  };
+
+  const resetDemo = () => {
+    if (window.confirm("Clear the sample demo data (fictional accounts, transactions, budgets, goals, subscriptions)? Your real imported registers — Cindy's Credit Card, Cindy's Checking, Mike's Checking, Savings, and HYSA — will be kept, reset to their originally imported state. This can't be undone.")) actions.resetDemo();
+  };
+
+  return (
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
+      <div>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800">Settings</h1>
+        <p className="text-slate-500 text-sm mt-1">Back up your data, restore a previous backup, or reset the sample data.</p>
+      </div>
+
+      <SectionNotes section="settings" data={data} actions={actions} />
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-slate-700">💾 Backup</h3>
+        <p className="text-sm text-slate-500 mt-1">Download everything in this app — accounts, transactions, budgets, goals, subscriptions, and notes — as a JSON file you can keep somewhere safe.</p>
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <Button onClick={handleBackup}>⬇ Download Backup</Button>
+          {lastBackup && <span className="text-xs text-slate-400">Last backup: {new Date(lastBackup).toLocaleString()}</span>}
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-slate-700">📤 Restore</h3>
+        <p className="text-sm text-slate-500 mt-1">Choose a backup file you've previously downloaded to restore it. This replaces all current data in the app, so make sure you've backed up anything you want to keep first.</p>
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <input ref={fileInputRef} type="file" accept="application/json,.json" className="hidden" onChange={e => handleFile(e.target.files[0])} />
+          <Button variant="secondary" onClick={openFilePicker}>📤 Choose Backup File…</Button>
+        </div>
+        {restoreError && <p className="text-sm text-rose-600 mt-2">{restoreError}</p>}
+        {restoreSuccess && <p className="text-sm text-emerald-600 mt-2">{restoreSuccess}</p>}
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-slate-700">⚠️ Reset Demo Data</h3>
+        <p className="text-sm text-slate-500 mt-1">Clear the fictional Michael &amp; Cynthia sample data. Your real imported registers (Cindy's Credit Card, Cindy's Checking, Mike's Checking, Savings, and HYSA) are kept, reset to their originally imported state.</p>
+        <div className="mt-3">
+          <Button variant="secondary" onClick={resetDemo}>Reset Demo Data</Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ============================== APP ROOT ============================== */
 
 const TAB_LABELS = {
   dashboard: "Dashboard", budgets: "Budgets", transactions: "Transactions",
   subscriptions: "Subscriptions & Bills", cashflow: "Cash Flow", goals: "Goals", accounts: "Accounts",
-  ai: "AI Assistant",
+  ai: "AI Assistant", settings: "Settings",
 };
 
 function App() {
@@ -3345,6 +3438,7 @@ function App() {
     })),
 
     resetDemo: () => { setData(ensureHouseholdRegisters(ensureCindyRegister(emptyData()))); },
+    restoreData: (newData) => { setData(ensureHouseholdRegisters(ensureCindyRegister(newData))); },
 
     setCindyNotes: (text) => setData(d => ({ ...d, cindyRegisterNotes: text })),
     setRegisterNotes: (accountId, text) => setData(d => ({ ...d, registerNotes: { ...(d.registerNotes || {}), [accountId]: text } })),
@@ -3368,6 +3462,7 @@ function App() {
           {tab === "goals" && <Goals data={data} actions={actions} />}
           {tab === "accounts" && <Accounts data={data} actions={actions} derived={derived} />}
           {tab === "ai" && <AIAssistant data={data} actions={actions} derived={derived} />}
+          {tab === "settings" && <Settings data={data} actions={actions} />}
         </main>
       </div>
     </div>
