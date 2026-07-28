@@ -2193,49 +2193,49 @@ function Transactions({ data, actions }) {
       </Card>
 
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[820px]">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="text-left px-5 py-3 font-medium">Merchant</th>
-              <th className="text-left px-5 py-3 font-medium">Category</th>
-              <th className="text-left px-5 py-3 font-medium">Person</th>
-              <th className="text-left px-5 py-3 font-medium">Account</th>
-              <th className="text-left px-5 py-3 font-medium">Date</th>
-              <th className="text-right px-5 py-3 font-medium">Amount</th>
-              <th className="px-5 py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.slice(0, limit).map(t => (
-              <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50 group">
-                <td className="px-5 py-3 font-medium text-slate-700">
-                  <div className="flex items-center gap-2">
-                    <MerchantAvatar merchant={t.merchant} category={t.category} size={26} />
-                    <span>{t.merchant}</span>
-                    {t.receipt && (
-                      <button type="button" title="View receipt" className="text-slate-400 hover:text-indigo-600" onClick={() => setViewingReceipt(t.receipt)}>📎</button>
-                    )}
-                  </div>
-                </td>
-                <td className="px-5 py-3"><Pill tone="slate">{t.category}</Pill></td>
-                <td className="px-5 py-3 text-slate-500">{PEOPLE_META[t.person || "Joint"].icon} {t.person || "Joint"}</td>
-                <td className="px-5 py-3 text-slate-500">{accountsById[t.accountId]?.name || "—"}</td>
-                <td className="px-5 py-3 text-slate-500">{fmtDate(t.date)}</td>
-                <td className={"px-5 py-3 text-right font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
-                  {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
-                </td>
-                <td className="px-5 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                  <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openEdit(t)}>Edit</button>
-                  <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
-                </td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan="7" className="text-center py-10 text-slate-400">No transactions match your filters.</td></tr>
-            )}
-          </tbody>
-        </table>
+        <div className="divide-y divide-slate-100">
+          {filtered.slice(0, limit).map(t => (
+            <div key={t.id} className="px-5 py-4 hover:bg-slate-50 group">
+              <div className="flex items-center gap-2 mb-3">
+                <MerchantAvatar merchant={t.merchant} category={t.category} size={30} />
+                <span className="font-semibold text-slate-800">{t.merchant}</span>
+                {t.receipt && (
+                  <button type="button" title="View receipt" className="text-slate-400 hover:text-indigo-600" onClick={() => setViewingReceipt(t.receipt)}>📎</button>
+                )}
+              </div>
+              <div className="space-y-1.5 text-sm pl-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Category</span>
+                  <Pill tone="slate">{t.category}</Pill>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Person</span>
+                  <span className="text-slate-600">{PEOPLE_META[t.person || "Joint"].icon} {t.person || "Joint"}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Account</span>
+                  <span className="text-slate-600">{accountsById[t.accountId]?.name || "—"}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Date</span>
+                  <span className="text-slate-600">{fmtDate(t.date)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Amount</span>
+                  <span className={"font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                    {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex gap-4 mt-3 pt-3 border-t border-slate-50 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(t)}>Edit</button>
+                <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div className="text-center py-10 text-slate-400">No transactions match your filters.</div>
+          )}
         </div>
         {filtered.length > limit && (
           <div className="text-center py-4 border-t border-slate-100">
