@@ -2691,7 +2691,7 @@ function Accounts({ data, actions, derived }) {
   };
 
   const resetDemo = () => {
-    if (confirm("Reset all data back to the original demo dataset? This can't be undone.")) actions.resetDemo();
+    if (confirm("Clear the sample demo data (fictional accounts, transactions, budgets, goals, subscriptions)? Your real imported registers — Cindy's Credit Card, Cindy's Checking, Mike's Checking, Savings, and HYSA — will be kept, reset to their originally imported state. This can't be undone.")) actions.resetDemo();
   };
 
   const assetAccounts = data.accounts.filter(a => a.balance >= 0);
