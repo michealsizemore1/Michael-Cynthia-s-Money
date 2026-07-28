@@ -1,0 +1,1811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Michael &amp; Cynthia's Money — Budget &amp; Net Worth Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  * { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  body { background: #f4f5f9; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+</style>
+</head>
+<body class="text-slate-800">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react,env">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+/* ============================== CONSTANTS ============================== */
+
+const STORAGE_KEY = "meridian_money_data_v5";
+
+const INVESTMENT_CATEGORY_META = {
+  "US Stocks":            { color: "#4f46e5" },
+  "International Stocks": { color: "#0ea5e9" },
+  "Bonds":                { color: "#22c55e" },
+  "Real Estate":          { color: "#f59e0b" },
+  "Cash":                 { color: "#94a3b8" },
+};
+
+const PEOPLE_META = {
+  "Joint":   { icon: "🤝", color: "#64748b" },
+  "Michael": { icon: "🧔", color: "#4f46e5" },
+  "Cynthia": { icon: "👩", color: "#ec4899" },
+};
+const PEOPLE = Object.keys(PEOPLE_META);
+
+const CATEGORY_META = {
+  "Housing":          { icon: "🏠", color: "#4f46e5" },
+  "Groceries":        { icon: "🛒", color: "#10b981" },
+  "Dining & Coffee":  { icon: "☕", color: "#f59e0b" },
+  "Transportation":   { icon: "🚗", color: "#3b82f6" },
+  "Shopping":         { icon: "🛍️", color: "#ec4899" },
+  "Entertainment":    { icon: "🎬", color: "#8b5cf6" },
+  "Subscriptions":    { icon: "🔁", color: "#14b8a6" },
+  "Utilities":        { icon: "💡", color: "#f97316" },
+  "Health & Fitness": { icon: "💪", color: "#22c55e" },
+  "Travel":           { icon: "✈️", color: "#0ea5e9" },
+  "Personal Care":    { icon: "🧴", color: "#d946ef" },
+  "Other":            { icon: "📦", color: "#64748b" },
+  "Income":           { icon: "💰", color: "#16a34a" },
+  "Transfer":         { icon: "↔️", color: "#94a3b8" },
+};
+
+const EXPENSE_CATEGORIES = Object.keys(CATEGORY_META).filter(c => c !== "Income" && c !== "Transfer");
+
+const ACCOUNT_TYPE_META = {
+  checking:   { icon: "🏦", label: "Checking" },
+  savings:    { icon: "🐷", label: "Savings" },
+  credit:     { icon: "💳", label: "Credit Card" },
+  investment: { icon: "📈", label: "Investment" },
+  loan:       { icon: "🚙", label: "Loan" },
+};
+
+const DEFAULT_BUDGETS = {
+  "Housing": 1800, "Groceries": 550, "Dining & Coffee": 300, "Transportation": 250,
+  "Shopping": 300, "Entertainment": 120, "Subscriptions": 90, "Utilities": 220,
+  "Health & Fitness": 150, "Travel": 200, "Personal Care": 80, "Other": 100,
+};
+
+/* ============================== UTILITIES ============================== */
+
+function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+
+function fmtCurrency(n, opts) {
+  const o = opts || {};
+  const abs = Math.abs(n);
+  const str = abs.toLocaleString("en-US", { minimumFractionDigits: o.decimals === false ? 0 : 2, maximumFractionDigits: o.decimals === false ? 0 : 2 });
+  return (n < 0 ? "-$" : "$") + str;
+}
+
+function fmtDate(d) {
+  const dt = new Date(d + "T00:00:00");
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtDateShort(d) {
+  const dt = new Date(d + "T00:00:00");
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function monthKey(d) { return d.slice(0, 7); }
+
+function pad(n) { return n < 10 ? "0" + n : "" + n; }
+
+function isoDate(y, m, day) { return `${y}-${pad(m)}-${pad(day)}`; }
+
+function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+
+function exportTransactionsCSV(transactions, accountsById) {
+  const header = ["Date", "Merchant", "Category", "Person", "Account", "Amount", "Notes"];
+  const rows = transactions.map(t => [
+    t.date, t.merchant, t.category, t.person || "Joint",
+    (accountsById[t.accountId] && accountsById[t.accountId].name) || "", t.amount, t.notes || "",
+  ]);
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "transactions.csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function estimateMinPayment(account) {
+  if (account.type === "credit") return Math.max(35, Math.abs(account.balance) * 0.03);
+  if (account.type === "loan") return 310;
+  return 0;
+}
+
+function simulatePayoff(debtAccounts, extraMonthly, strategy) {
+  let bals = debtAccounts.map(d => ({ id: d.id, name: d.name, balance: Math.abs(d.balance), apr: d.apr || 0, minPayment: estimateMinPayment(d) }));
+  const order = strategy === "avalanche"
+    ? [...bals].sort((a, b) => b.apr - a.apr).map(d => d.id)
+    : [...bals].sort((a, b) => a.balance - b.balance).map(d => d.id);
+
+  let months = 0, totalInterest = 0;
+  const schedule = [bals.reduce((s, d) => s + d.balance, 0)];
+  while (bals.some(d => d.balance > 0.01) && months < 480) {
+    months++;
+    bals.forEach(d => {
+      if (d.balance <= 0) return;
+      const interest = d.balance * (d.apr / 100 / 12);
+      totalInterest += interest;
+      d.balance += interest;
+    });
+    bals.forEach(d => {
+      if (d.balance <= 0) return;
+      d.balance -= Math.min(d.minPayment, d.balance);
+    });
+    let extra = extraMonthly;
+    for (const id of order) {
+      if (extra <= 0) break;
+      const d = bals.find(x => x.id === id);
+      if (!d || d.balance <= 0) continue;
+      const pay = Math.min(extra, d.balance);
+      d.balance -= pay;
+      extra -= pay;
+    }
+    schedule.push(bals.reduce((s, d) => s + Math.max(0, d.balance), 0));
+  }
+  return { months, totalInterest, schedule, payoffOrder: order.map(id => bals.find(d => d.id === id).name) };
+}
+
+function buildInsights(data, derived) {
+  const insights = [];
+  const months = derived.trendMonths;
+
+  if (months.length >= 2) {
+    const cur = months[months.length - 1];
+    const prev = months[months.length - 2];
+    const curTotals = derived.monthlyCategoryTotals[cur] || {};
+    const prevTotals = derived.monthlyCategoryTotals[prev] || {};
+    let biggest = null;
+    Object.keys(curTotals).forEach(cat => {
+      const prevAmt = prevTotals[cat] || 0;
+      const curAmt = curTotals[cat];
+      if (prevAmt > 20) {
+        const pctChange = ((curAmt - prevAmt) / prevAmt) * 100;
+        if (!biggest || Math.abs(pctChange) > Math.abs(biggest.pctChange)) biggest = { cat, pctChange, curAmt, prevAmt };
+      }
+    });
+    if (biggest && Math.abs(biggest.pctChange) >= 10) {
+      insights.push({
+        icon: biggest.pctChange > 0 ? "📈" : "📉",
+        text: `${biggest.cat} spending is ${biggest.pctChange > 0 ? "up" : "down"} ${Math.abs(biggest.pctChange).toFixed(0)}% vs last month (${fmtCurrency(biggest.curAmt, { decimals: false })} vs ${fmtCurrency(biggest.prevAmt, { decimals: false })}).`,
+      });
+    }
+  }
+
+  if (derived.budgetAlerts.length > 0) {
+    const worst = [...derived.budgetAlerts].sort((a, b) => b.pct - a.pct)[0];
+    const daysLeft = daysInMonth(2026, 7) - 27;
+    insights.push({ icon: "⚠️", text: `${worst.cat} is ${worst.over ? "over budget" : `at ${worst.pct.toFixed(0)}% of budget`} with ${daysLeft} days left in the month.` });
+  }
+
+  data.goals.forEach(g => {
+    const pct = g.target > 0 ? (g.current / g.target) * 100 : 0;
+    if (pct >= 90 && pct < 100) insights.push({ icon: "🏆", text: `You're ${pct.toFixed(0)}% of the way to "${g.name}" — almost there!` });
+  });
+
+  const cancelledSubs = (data.subscriptions || []).filter(s => !s.active);
+  if (cancelledSubs.length > 0) {
+    const saved = cancelledSubs.reduce((s, x) => s + x.amount, 0);
+    insights.push({ icon: "💸", text: `Cancelling ${cancelledSubs.length} subscription${cancelledSubs.length > 1 ? "s" : ""} is saving you ${fmtCurrency(saved, { decimals: false })}/mo (${fmtCurrency(saved * 12, { decimals: false })}/yr).` });
+  }
+
+  if (derived.savingsRate >= 20) {
+    insights.push({ icon: "🎉", text: `Nice work — you're saving ${derived.savingsRate.toFixed(0)}% of income this month, above the 20% benchmark.` });
+  } else if (derived.savingsRate < 5 && derived.monthIncome > 0) {
+    insights.push({ icon: "🔍", text: `Savings rate is ${derived.savingsRate.toFixed(0)}% this month — below the 20% benchmark most planners recommend.` });
+  }
+
+  return insights.slice(0, 5);
+}
+
+/* ============================== SEED DATA GENERATOR ============================== */
+
+function generateSeedData() {
+  const rng = mulberry32(1337);
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  const range = (min, max) => Math.round((min + rng() * (max - min)) * 100) / 100;
+
+  const accounts = [
+    { id: "acc_checking", name: "Total Checking", institution: "Chase", type: "checking", balance: 4820.63 },
+    { id: "acc_savings",  name: "Online Savings", institution: "Ally Bank", type: "savings", balance: 12540.10 },
+    { id: "acc_credit",   name: "Sapphire Preferred", institution: "Chase", type: "credit", balance: -1284.32, apr: 24.99 },
+    { id: "acc_invest",   name: "Brokerage", institution: "Vanguard", type: "investment", balance: 28710.55 },
+    { id: "acc_loan",     name: "Auto Loan", institution: "Toyota Financial", type: "loan", balance: -9760.00, apr: 5.90 },
+  ];
+
+  const investments = [
+    { id: uid(), name: "US Total Market Index", category: "US Stocks", value: 12400.00 },
+    { id: uid(), name: "International Stock Index", category: "International Stocks", value: 5200.00 },
+    { id: uid(), name: "Growth Tech ETF", category: "US Stocks", value: 2600.00 },
+    { id: uid(), name: "Total Bond Market Index", category: "Bonds", value: 4500.00 },
+    { id: uid(), name: "REIT Index", category: "Real Estate", value: 1510.55 },
+    { id: uid(), name: "Money Market / Cash", category: "Cash", value: 2500.00 },
+  ];
+
+  const merchantPools = {
+    "Groceries":        { m: ["Whole Foods Market", "Trader Joe's", "Safeway", "Kroger", "Costco Wholesale"], min: 28, max: 145 },
+    "Dining & Coffee":   { m: ["Starbucks", "Chipotle", "Local Coffee Co.", "Sushi House", "Pizza Palace", "DoorDash", "Panera Bread"], min: 6, max: 68 },
+    "Transportation":   { m: ["Shell Gas Station", "Chevron", "Uber", "Lyft", "City Metro Transit"], min: 11, max: 62 },
+    "Shopping":         { m: ["Amazon", "Target", "Best Buy", "Nike", "Home Depot", "Etsy"], min: 14, max: 225 },
+    "Entertainment":    { m: ["AMC Theatres", "Steam", "Ticketmaster", "Lucky Strike Bowling"], min: 9, max: 92 },
+    "Personal Care":    { m: ["Great Clips", "Sephora", "CVS Pharmacy"], min: 14, max: 88 },
+    "Other":            { m: ["Venmo Transfer", "ATM Withdrawal", "USPS", "Misc Purchase"], min: 8, max: 60 },
+  };
+
+  const freqDays = { "Groceries": 4, "Dining & Coffee": 2, "Transportation": 5, "Shopping": 6, "Entertainment": 9, "Personal Care": 19, "Other": 14 };
+
+  const personWeights = {
+    "Groceries":       { Joint: 0.8, Michael: 0.1, Cynthia: 0.1 },
+    "Dining & Coffee": { Joint: 0.34, Michael: 0.33, Cynthia: 0.33 },
+    "Transportation":  { Joint: 0.1, Michael: 0.5, Cynthia: 0.4 },
+    "Shopping":        { Joint: 0.2, Michael: 0.35, Cynthia: 0.45 },
+    "Entertainment":   { Joint: 0.6, Michael: 0.2, Cynthia: 0.2 },
+    "Personal Care":   { Joint: 0, Michael: 0.4, Cynthia: 0.6 },
+    "Other":           { Joint: 0.7, Michael: 0.15, Cynthia: 0.15 },
+  };
+  const weightedPerson = (weights) => {
+    const r = rng(); let acc = 0;
+    for (const [k, w] of Object.entries(weights)) { acc += w; if (r < acc) return k; }
+    return "Joint";
+  };
+
+  const transactions = [];
+  const start = new Date("2026-04-01T00:00:00");
+  const end = new Date("2026-07-27T00:00:00");
+
+  // Variable day-to-day spending
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    Object.keys(freqDays).forEach((cat) => {
+      if (rng() < 1 / freqDays[cat]) {
+        const pool = merchantPools[cat];
+        const amt = -range(pool.min, pool.max);
+        transactions.push({
+          id: uid(), date: iso, accountId: rng() < 0.55 ? "acc_credit" : "acc_checking",
+          merchant: pick(pool.m), category: cat, amount: amt, notes: "", person: weightedPerson(personWeights[cat]),
+        });
+      }
+    });
+  }
+
+  // Fixed monthly bills + subscriptions across each month in range
+  const months = [];
+  for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d <= end; d.setMonth(d.getMonth() + 1)) {
+    months.push({ y: d.getFullYear(), m: d.getMonth() + 1 });
+  }
+
+  const fixedBills = [
+    { merchant: "Skyline Apartments", category: "Housing", amount: 1800, day: 1, accountId: "acc_checking", person: "Joint" },
+    { merchant: "Pacific Gas & Electric", category: "Utilities", amount: null, min: 84, max: 138, day: 10, accountId: "acc_checking", person: "Joint" },
+    { merchant: "Xfinity Internet", category: "Utilities", amount: 70.00, day: 14, accountId: "acc_checking", person: "Joint" },
+    { merchant: "Toyota Financial Services", category: "Transportation", amount: 310.00, day: 5, accountId: "acc_checking", person: "Michael" },
+    { merchant: "Planet Fitness", category: "Health & Fitness", amount: 24.99, day: 1, accountId: "acc_checking", person: "Cynthia" },
+  ];
+
+  months.forEach(({ y, m }) => {
+    fixedBills.forEach((b) => {
+      const day = Math.min(b.day, daysInMonth(y, m));
+      const iso = isoDate(y, m, day);
+      if (new Date(iso) > end) return;
+      const amt = b.amount != null ? b.amount : range(b.min, b.max);
+      transactions.push({ id: uid(), date: iso, accountId: b.accountId, merchant: b.merchant, category: b.category, amount: -amt, notes: "", person: b.person });
+    });
+  });
+
+  const recurringBills = fixedBills.map((b) => ({
+    id: uid(), merchant: b.merchant, category: b.category,
+    amount: b.amount != null ? b.amount : Math.round((b.min + b.max) / 2 * 100) / 100,
+    dayOfMonth: b.day, person: b.person, variable: b.amount == null,
+  }));
+
+  // Subscriptions (tracked separately too)
+  const subDefs = [
+    { merchant: "Netflix", category: "Subscriptions", day: 5, accountId: "acc_credit", person: "Joint", history: [{ date: "2026-01-05", amount: 15.49 }] },
+    { merchant: "Spotify", category: "Subscriptions", day: 8, accountId: "acc_credit", person: "Michael", history: [{ date: "2026-02-08", amount: 10.99 }, { date: "2026-05-08", amount: 11.99 }] },
+    { merchant: "Disney+", category: "Subscriptions", day: 12, accountId: "acc_credit", person: "Joint", history: [{ date: "2026-01-12", amount: 13.99 }] },
+    { merchant: "iCloud+ 200GB", category: "Subscriptions", day: 2, accountId: "acc_credit", person: "Michael", history: [{ date: "2026-01-02", amount: 2.99 }] },
+    { merchant: "Amazon Prime", category: "Subscriptions", day: 20, accountId: "acc_credit", person: "Joint", history: [{ date: "2026-01-20", amount: 14.99 }] },
+    { merchant: "The New York Times", category: "Subscriptions", day: 15, accountId: "acc_credit", person: "Cynthia", history: [{ date: "2026-03-15", amount: 17.00 }] },
+  ];
+
+  months.forEach(({ y, m }) => {
+    subDefs.forEach((s) => {
+      const day = Math.min(s.day, daysInMonth(y, m));
+      const iso = isoDate(y, m, day);
+      if (new Date(iso) > end) return;
+      let amt = s.history[0].amount;
+      for (const h of s.history) if (iso >= h.date) amt = h.amount;
+      transactions.push({ id: uid(), date: iso, accountId: s.accountId, merchant: s.merchant, category: s.category, amount: -amt, notes: "", person: s.person });
+    });
+  });
+
+  const subscriptions = subDefs.map((s) => ({
+    id: uid(), merchant: s.merchant, category: s.category, cadence: "Monthly",
+    amount: s.history[s.history.length - 1].amount, dayOfMonth: s.day, active: true, priceHistory: s.history, person: s.person,
+  }));
+
+  // Biweekly paychecks — Michael and Cynthia each have their own income stream
+  let payDateM = new Date("2026-04-03T00:00:00");
+  while (payDateM <= end) {
+    transactions.push({
+      id: uid(), date: payDateM.toISOString().slice(0, 10), accountId: "acc_checking",
+      merchant: "Acme Corp Payroll", category: "Income", amount: 2850.00, notes: "Biweekly paycheck", person: "Michael",
+    });
+    payDateM = new Date(payDateM.getTime() + 14 * 86400000);
+  }
+  let payDateC = new Date("2026-04-10T00:00:00");
+  while (payDateC <= end) {
+    transactions.push({
+      id: uid(), date: payDateC.toISOString().slice(0, 10), accountId: "acc_checking",
+      merchant: "BrightPath Consulting", category: "Income", amount: 2200.00, notes: "Biweekly paycheck", person: "Cynthia",
+    });
+    payDateC = new Date(payDateC.getTime() + 14 * 86400000);
+  }
+
+  // Occasional transfer to savings
+  ["2026-04-15", "2026-05-15", "2026-06-15", "2026-07-15"].forEach((iso) => {
+    if (new Date(iso) <= end) {
+      transactions.push({ id: uid(), date: iso, accountId: "acc_checking", merchant: "Transfer to Savings", category: "Transfer", amount: -500, notes: "", person: "Joint" });
+      transactions.push({ id: uid(), date: iso, accountId: "acc_savings", merchant: "Transfer from Checking", category: "Transfer", amount: 500, notes: "", person: "Joint" });
+    }
+  });
+
+  const rules = [
+    { id: uid(), keyword: "Starbucks", category: "Dining & Coffee" },
+    { id: uid(), keyword: "Whole Foods", category: "Groceries" },
+    { id: uid(), keyword: "Amazon", category: "Shopping" },
+    { id: uid(), keyword: "Shell", category: "Transportation" },
+  ];
+
+  transactions.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const netWorthHistory = [
+    { month: "2026-01", netWorth: 28950 },
+    { month: "2026-02", netWorth: 29680 },
+    { month: "2026-03", netWorth: 30420 },
+    { month: "2026-04", netWorth: 31150 },
+    { month: "2026-05", netWorth: 32080 },
+    { month: "2026-06", netWorth: 33240 },
+    { month: "2026-07", netWorth: accounts.reduce((s, a) => s + a.balance, 0) },
+  ];
+
+  const goals = [
+    { id: uid(), name: "Emergency Fund", icon: "🛟", target: 15000, current: 9200, deadline: "2026-12-31", color: "#4f46e5" },
+    { id: uid(), name: "Hawaii Trip", icon: "🌺", target: 4000, current: 1450, deadline: "2027-03-01", color: "#0ea5e9" },
+    { id: uid(), name: "New Car Down Payment", icon: "🚗", target: 6000, current: 2100, deadline: "2027-06-01", color: "#f59e0b" },
+    { id: uid(), name: "Pay Off Credit Card", icon: "💳", target: 1284, current: 380, deadline: "2026-11-01", color: "#ec4899" },
+  ];
+
+  return { accounts, transactions, budgets: { ...DEFAULT_BUDGETS }, subscriptions, goals, netWorthHistory, recurringBills, rules, investments };
+}
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  const seeded = generateSeedData();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+  return seeded;
+}
+
+function saveData(data) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
+}
+
+/* ============================== SMALL UI PRIMITIVES ============================== */
+
+function Card({ children, className }) {
+  return <div className={"bg-white rounded-2xl border border-slate-200 shadow-sm " + (className || "")}>{children}</div>;
+}
+
+function ProgressBar({ pct, color }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+      <div className="h-full rounded-full transition-all" style={{ width: clamped + "%", background: color || "#4f46e5" }} />
+    </div>
+  );
+}
+
+function Pill({ children, tone }) {
+  const tones = {
+    green: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    red: "bg-rose-50 text-rose-700 border-rose-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    slate: "bg-slate-100 text-slate-600 border-slate-200",
+    indigo: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  };
+  return <span className={"text-xs font-medium px-2 py-0.5 rounded-full border " + (tones[tone] || tones.slate)}>{children}</span>;
+}
+
+function Modal({ open, onClose, title, children, wide }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className={"bg-white rounded-2xl shadow-xl w-full " + (wide ? "max-w-2xl" : "max-w-md") + " max-h-[90vh] overflow-y-auto"}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl">
+          <h3 className="font-semibold text-slate-800 text-lg">{title}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-slate-600 mb-1.5">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const inputClass = "w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm";
+
+function Button({ children, onClick, variant, className, type }) {
+  const variants = {
+    primary: "bg-indigo-600 hover:bg-indigo-700 text-white",
+    secondary: "bg-slate-100 hover:bg-slate-200 text-slate-700",
+    danger: "bg-rose-50 hover:bg-rose-100 text-rose-600",
+  };
+  return (
+    <button type={type || "button"} onClick={onClick} className={"px-4 py-2 rounded-lg text-sm font-medium transition-colors " + (variants[variant] || variants.primary) + " " + (className || "")}>
+      {children}
+    </button>
+  );
+}
+
+/* ============================== CHARTS ============================== */
+
+function LineChartCanvas({ labels, values, height }) {
+  const ref = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    if (chartRef.current) chartRef.current.destroy();
+    chartRef.current = new Chart(ref.current, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data: values, borderColor: "#4f46e5", backgroundColor: "rgba(79,70,229,0.08)",
+          borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: "#4f46e5", tension: 0.35, fill: true,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => "$" + ctx.parsed.y.toLocaleString() } } },
+        scales: {
+          y: { ticks: { callback: (v) => "$" + (v / 1000) + "k", color: "#94a3b8" }, grid: { color: "#f1f5f9" } },
+          x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
+        },
+      },
+    });
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [JSON.stringify(labels), JSON.stringify(values)]);
+
+  return <div style={{ height: height || 260 }}><canvas ref={ref}></canvas></div>;
+}
+
+function DoughnutChartCanvas({ labels, values, colors, height }) {
+  const ref = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    if (chartRef.current) chartRef.current.destroy();
+    chartRef.current = new Chart(ref.current, {
+      type: "doughnut",
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: "68%",
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ctx.label + ": $" + ctx.parsed.toLocaleString() } },
+        },
+      },
+    });
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [JSON.stringify(labels), JSON.stringify(values)]);
+
+  return <div style={{ height: height || 220 }}><canvas ref={ref}></canvas></div>;
+}
+
+function BarChartCanvas({ labels, values, color, height }) {
+  const ref = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    if (chartRef.current) chartRef.current.destroy();
+    chartRef.current = new Chart(ref.current, {
+      type: "bar",
+      data: { labels, datasets: [{ data: values, backgroundColor: color || "#4f46e5", borderRadius: 6, maxBarThickness: 46 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => "$" + ctx.parsed.y.toLocaleString() } } },
+        scales: {
+          y: { ticks: { callback: (v) => "$" + v.toLocaleString(), color: "#94a3b8" }, grid: { color: "#f1f5f9" } },
+          x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
+        },
+      },
+    });
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [JSON.stringify(labels), JSON.stringify(values), color]);
+
+  return <div style={{ height: height || 220 }}><canvas ref={ref}></canvas></div>;
+}
+
+/* ============================== DERIVED DATA HELPERS ============================== */
+
+function useDerived(data) {
+  return useMemo(() => {
+    const netWorth = data.accounts.reduce((s, a) => s + a.balance, 0);
+    const totalAssets = data.accounts.filter(a => a.balance > 0).reduce((s, a) => s + a.balance, 0);
+    const totalDebt = data.accounts.filter(a => a.balance < 0).reduce((s, a) => s + Math.abs(a.balance), 0);
+
+    const now = new Date("2026-07-27T00:00:00");
+    const curMonth = now.toISOString().slice(0, 7);
+
+    const monthTx = data.transactions.filter(t => monthKey(t.date) === curMonth);
+    const spendByCategory = {};
+    const spendByPerson = { Joint: 0, Michael: 0, Cynthia: 0 };
+    let monthIncome = 0, monthExpense = 0;
+    monthTx.forEach(t => {
+      if (t.category === "Transfer") return;
+      if (t.amount > 0) monthIncome += t.amount;
+      else {
+        monthExpense += -t.amount;
+        spendByCategory[t.category] = (spendByCategory[t.category] || 0) + (-t.amount);
+        const p = t.person || "Joint";
+        spendByPerson[p] = (spendByPerson[p] || 0) + (-t.amount);
+      }
+    });
+
+    const savingsRate = monthIncome > 0 ? ((monthIncome - monthExpense) / monthIncome) * 100 : 0;
+
+    // Budget alerts — categories at or above 85% of their monthly budget
+    const budgetAlerts = EXPENSE_CATEGORIES
+      .map(cat => ({ cat, budget: data.budgets[cat] || 0, spent: spendByCategory[cat] || 0 }))
+      .filter(x => x.budget > 0 && x.spent / x.budget >= 0.85)
+      .map(x => ({ ...x, pct: (x.spent / x.budget) * 100, over: x.spent > x.budget }));
+
+    // Safe to spend — checking balance minus bills/subscriptions still due this month
+    const todayDay = now.getDate();
+    const recurringItems = [
+      ...(data.recurringBills || []),
+      ...data.subscriptions.filter(s => s.active).map(s => ({ merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category })),
+    ];
+    const upcomingBillsRemaining = recurringItems.filter(b => b.dayOfMonth > todayDay).reduce((s, b) => s + b.amount, 0);
+    const checkingAccount = data.accounts.find(a => a.type === "checking");
+    const safeToSpend = (checkingAccount ? checkingAccount.balance : 0) - upcomingBillsRemaining;
+
+    // Monthly category totals for trend charts
+    const monthlyCategoryTotals = {};
+    data.transactions.forEach(t => {
+      if (t.category === "Transfer" || t.amount > 0) return;
+      const mk = monthKey(t.date);
+      monthlyCategoryTotals[mk] = monthlyCategoryTotals[mk] || {};
+      monthlyCategoryTotals[mk][t.category] = (monthlyCategoryTotals[mk][t.category] || 0) + (-t.amount);
+    });
+    const trendMonths = Object.keys(monthlyCategoryTotals).sort();
+
+    // Financial wellness score (0-100) — savings rate, budget adherence, debt-to-income, emergency fund coverage
+    const clamp = (v) => Math.max(0, Math.min(100, v));
+    const savingsScore = clamp((savingsRate / 20) * 100);
+    const budgetableCount = EXPENSE_CATEGORIES.filter(c => (data.budgets[c] || 0) > 0).length;
+    const withinBudgetCount = EXPENSE_CATEGORIES.filter(c => (data.budgets[c] || 0) > 0 && (spendByCategory[c] || 0) <= (data.budgets[c] || 0)).length;
+    const budgetScore = budgetableCount > 0 ? clamp((withinBudgetCount / budgetableCount) * 100) : 100;
+    const annualIncome = monthIncome * 12;
+    const debtToIncome = annualIncome > 0 ? totalDebt / annualIncome : 0;
+    const debtScore = clamp(100 - debtToIncome * 150);
+    const savingsAccount = data.accounts.find(a => a.type === "savings");
+    const monthsCovered = monthExpense > 0 ? (savingsAccount ? savingsAccount.balance : 0) / monthExpense : 0;
+    const emergencyScore = clamp((monthsCovered / 6) * 100);
+    const wellnessScore = Math.round(savingsScore * 0.35 + budgetScore * 0.25 + debtScore * 0.20 + emergencyScore * 0.20);
+    const wellnessFactors = [
+      { label: "Savings rate", score: Math.round(savingsScore), detail: `${savingsRate.toFixed(0)}% of income saved (target 20%)` },
+      { label: "Budget adherence", score: Math.round(budgetScore), detail: `${withinBudgetCount}/${budgetableCount} categories within budget` },
+      { label: "Debt-to-income", score: Math.round(debtScore), detail: `${(debtToIncome * 100).toFixed(0)}% of annual income owed` },
+      { label: "Emergency fund", score: Math.round(emergencyScore), detail: `${monthsCovered.toFixed(1)} months of expenses saved (target 6)` },
+    ];
+
+    return {
+      netWorth, totalAssets, totalDebt, curMonth, monthTx, spendByCategory, spendByPerson,
+      monthIncome, monthExpense, savingsRate, budgetAlerts, recurringItems, upcomingBillsRemaining,
+      safeToSpend, checkingAccount, monthlyCategoryTotals, trendMonths, wellnessScore, wellnessFactors,
+    };
+  }, [data]);
+}
+
+/* ============================== SIDEBAR ============================== */
+
+function Sidebar({ tab, setTab, netWorth }) {
+  const items = [
+    { id: "dashboard", label: "Dashboard", icon: "📊" },
+    { id: "budgets", label: "Budgets", icon: "🎯" },
+    { id: "transactions", label: "Transactions", icon: "🧾" },
+    { id: "subscriptions", label: "Subscriptions & Bills", icon: "🔁" },
+    { id: "cashflow", label: "Cash Flow", icon: "💵" },
+    { id: "goals", label: "Goals", icon: "🏆" },
+    { id: "accounts", label: "Accounts", icon: "🏛️" },
+  ];
+  return (
+    <div className="w-64 shrink-0 bg-slate-900 text-slate-200 flex flex-col h-full">
+      <div className="px-5 py-5 flex items-center gap-2 border-b border-slate-800">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-teal-400 flex items-center justify-center font-bold text-white">M&amp;C</div>
+        <div>
+          <div className="font-bold text-white leading-tight">Michael &amp; Cynthia's</div>
+          <div className="text-[11px] text-slate-400 leading-tight">Money</div>
+        </div>
+      </div>
+      <nav className="flex-1 px-3 py-4 space-y-1">
+        {items.map(it => (
+          <button
+            key={it.id}
+            onClick={() => setTab(it.id)}
+            className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors " +
+              (tab === it.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800")}
+          >
+            <span>{it.icon}</span>{it.label}
+          </button>
+        ))}
+      </nav>
+      <div className="px-5 py-5 border-t border-slate-800">
+        <div className="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Net Worth</div>
+        <div className={"text-xl font-bold " + (netWorth >= 0 ? "text-white" : "text-rose-400")}>{fmtCurrency(netWorth, { decimals: false })}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== DASHBOARD ============================== */
+
+function Dashboard({ data, derived }) {
+  const nwLabels = data.netWorthHistory.map(h => new Date(h.month + "-01T00:00:00").toLocaleDateString("en-US", { month: "short" }));
+  const nwValues = data.netWorthHistory.map(h => h.netWorth);
+
+  const catEntries = Object.entries(derived.spendByCategory).sort((a, b) => b[1] - a[1]);
+  const catLabels = catEntries.map(e => e[0]);
+  const catValues = catEntries.map(e => e[1]);
+  const catColors = catLabels.map(c => CATEGORY_META[c].color);
+
+  const recentTx = [...data.transactions].slice(0, 6);
+  const upcomingBills = derived.recurringItems
+    .slice()
+    .sort((a, b) => a.dayOfMonth - b.dayOfMonth)
+    .slice(0, 6);
+
+  const personEntries = PEOPLE.map(p => [p, derived.spendByPerson[p] || 0]).filter(([, amt]) => amt > 0);
+  const personTotal = personEntries.reduce((s, [, amt]) => s + amt, 0) || 1;
+
+  const insights = useMemo(() => buildInsights(data, derived), [data, derived]);
+  const wellnessLabel = derived.wellnessScore >= 80 ? "Excellent" : derived.wellnessScore >= 60 ? "Good" : derived.wellnessScore >= 40 ? "Fair" : "Needs Attention";
+  const wellnessColor = derived.wellnessScore >= 80 ? "#16a34a" : derived.wellnessScore >= 60 ? "#4f46e5" : derived.wellnessScore >= 40 ? "#f59e0b" : "#e11d48";
+
+  return (
+    <div className="p-8 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Good to see you, Michael &amp; Cynthia 👋</h1>
+        <p className="text-slate-500 text-sm mt-1">Here's your financial overview for {new Date("2026-07-27").toLocaleDateString("en-US", { month: "long", year: "numeric" })}.</p>
+      </div>
+
+      {derived.budgetAlerts.length > 0 && (
+        <Card className="p-4 border-amber-200 bg-amber-50/60">
+          <div className="text-sm text-amber-800">
+            <span className="font-semibold">⚠️ Budget watch:</span>{" "}
+            {derived.budgetAlerts.map((a, i) => (
+              <span key={a.cat}>{i > 0 ? ", " : " "}{a.cat} {a.over ? "is over budget" : `is at ${a.pct.toFixed(0)}%`}</span>
+            ))}.
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-5 gap-5">
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Net Worth</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(derived.netWorth, { decimals: false })}</div>
+          <div className="text-xs text-emerald-600 font-medium mt-1">↑ 3.8% this month</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Income (MTD)</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(derived.monthIncome, { decimals: false })}</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">Paychecks + deposits</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Spending (MTD)</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(derived.monthExpense, { decimals: false })}</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">Across all categories</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Savings Rate</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{derived.savingsRate.toFixed(0)}%</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">Of income kept</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Safe to Spend</div>
+          <div className={"text-2xl font-bold mt-1 " + (derived.safeToSpend >= 0 ? "text-slate-800" : "text-rose-600")}>{fmtCurrency(derived.safeToSpend, { decimals: false })}</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">After bills left this month</div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-3 gap-5">
+        <Card className="col-span-2 p-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-slate-700">Net Worth Trend</h3>
+            <Pill tone="indigo">Last 7 months</Pill>
+          </div>
+          <LineChartCanvas labels={nwLabels} values={nwValues} />
+        </Card>
+        <div className="space-y-5">
+          <Card className="p-6">
+            <h3 className="font-semibold text-slate-700 mb-2">Spending by Category</h3>
+            {catLabels.length === 0 ? (
+              <div className="text-sm text-slate-400 py-10 text-center">No spending yet this month.</div>
+            ) : (
+              <React.Fragment>
+                <DoughnutChartCanvas labels={catLabels} values={catValues} colors={catColors} height={170} />
+                <div className="mt-3 space-y-1.5 max-h-28 overflow-y-auto no-scrollbar">
+                  {catEntries.slice(0, 5).map(([cat, amt]) => (
+                    <div key={cat} className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full inline-block" style={{ background: CATEGORY_META[cat].color }}></span>{cat}</span>
+                      <span className="font-medium text-slate-700">{fmtCurrency(amt)}</span>
+                    </div>
+                  ))}
+                </div>
+              </React.Fragment>
+            )}
+          </Card>
+          <Card className="p-6">
+            <h3 className="font-semibold text-slate-700 mb-3">Spending by Person</h3>
+            {personEntries.length === 0 ? (
+              <div className="text-sm text-slate-400 py-4 text-center">No spending yet this month.</div>
+            ) : (
+              <div className="space-y-3">
+                {personEntries.map(([p, amt]) => (
+                  <div key={p}>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="flex items-center gap-1.5 text-slate-600">{PEOPLE_META[p].icon} {p}</span>
+                      <span className="font-medium text-slate-700">{fmtCurrency(amt, { decimals: false })}</span>
+                    </div>
+                    <ProgressBar pct={(amt / personTotal) * 100} color={PEOPLE_META[p].color} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-5">
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-700 mb-3">Financial Health</h3>
+          <div className="flex items-center gap-4">
+            <div className="relative w-20 h-20 shrink-0">
+              <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
+                <path d="M18 2.5 a 15.5 15.5 0 0 1 0 31 a 15.5 15.5 0 0 1 0 -31" fill="none" stroke="#f1f5f9" strokeWidth="3.5" />
+                <path
+                  d="M18 2.5 a 15.5 15.5 0 0 1 0 31 a 15.5 15.5 0 0 1 0 -31"
+                  fill="none" stroke={wellnessColor} strokeWidth="3.5" strokeLinecap="round"
+                  strokeDasharray={`${derived.wellnessScore}, 100`}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center text-lg font-bold text-slate-800">{derived.wellnessScore}</div>
+            </div>
+            <div>
+              <div className="text-sm font-semibold" style={{ color: wellnessColor }}>{wellnessLabel}</div>
+              <div className="text-xs text-slate-400">Out of 100</div>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2.5">
+            {derived.wellnessFactors.map(f => (
+              <div key={f.label}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-slate-600">{f.label}</span>
+                  <span className="font-medium text-slate-700">{f.score}</span>
+                </div>
+                <ProgressBar pct={f.score} color={f.score >= 60 ? "#16a34a" : f.score >= 40 ? "#f59e0b" : "#e11d48"} />
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card className="col-span-2 p-6">
+          <h3 className="font-semibold text-slate-700 mb-3">Insights</h3>
+          {insights.length === 0 ? (
+            <div className="text-sm text-slate-400 py-8 text-center">No notable changes to flag right now.</div>
+          ) : (
+            <div className="space-y-3">
+              {insights.map((ins, i) => (
+                <div key={i} className="flex items-start gap-3 text-sm">
+                  <span className="text-lg leading-none">{ins.icon}</span>
+                  <span className="text-slate-600 pt-0.5">{ins.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-3 gap-5">
+        <Card className="col-span-2 p-6">
+          <h3 className="font-semibold text-slate-700 mb-4">Recent Transactions</h3>
+          <div className="space-y-3">
+            {recentTx.map(t => (
+              <div key={t.id} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-base">{CATEGORY_META[t.category]?.icon || "💵"}</div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-700">{t.merchant}</div>
+                    <div className="text-xs text-slate-400">{fmtDateShort(t.date)} · {t.category}</div>
+                  </div>
+                </div>
+                <div className={"text-sm font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                  {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-700 mb-4">Upcoming Bills</h3>
+          <div className="space-y-3">
+            {upcomingBills.map((b, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-slate-700">{b.merchant}</div>
+                  <div className="text-xs text-slate-400">Due on the {b.dayOfMonth}{b.dayOfMonth === 1 ? "st" : b.dayOfMonth <= 3 ? "rd" : "th"}</div>
+                </div>
+                <div className="text-sm font-semibold text-slate-700">{fmtCurrency(b.amount)}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== BUDGETS ============================== */
+
+function Budgets({ data, actions, derived }) {
+  const [editCat, setEditCat] = useState(null);
+  const [editVal, setEditVal] = useState("");
+  const [trendCat, setTrendCat] = useState("Groceries");
+
+  const totalBudget = Object.values(data.budgets).reduce((s, v) => s + v, 0);
+  const totalSpent = Object.values(derived.spendByCategory).reduce((s, v) => s + v, 0);
+
+  const trendLabels = derived.trendMonths.map(m => new Date(m + "-01T00:00:00").toLocaleDateString("en-US", { month: "short" }));
+  const trendValues = derived.trendMonths.map(m => (derived.monthlyCategoryTotals[m] && derived.monthlyCategoryTotals[m][trendCat]) || 0);
+
+  const openEdit = (cat) => { setEditCat(cat); setEditVal(String(data.budgets[cat] || 0)); };
+  const saveEdit = () => {
+    const v = parseFloat(editVal);
+    if (!isNaN(v) && v >= 0) actions.setBudget(editCat, v);
+    setEditCat(null);
+  };
+
+  return (
+    <div className="p-8 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Budgets</h1>
+          <p className="text-slate-500 text-sm mt-1">Monthly spending plan by category — {new Date("2026-07-27").toLocaleDateString("en-US", { month: "long", year: "numeric" })}.</p>
+        </div>
+        <Card className="px-5 py-3">
+          <div className="text-xs text-slate-400">Total Budget Used</div>
+          <div className="text-lg font-bold text-slate-800">{fmtCurrency(totalSpent, { decimals: false })} <span className="text-sm font-normal text-slate-400">/ {fmtCurrency(totalBudget, { decimals: false })}</span></div>
+        </Card>
+      </div>
+
+      {derived.budgetAlerts.length > 0 && (
+        <Card className="p-4 border-amber-200 bg-amber-50/60">
+          <div className="text-sm text-amber-800">
+            <span className="font-semibold">⚠️ Budget watch:</span>{" "}
+            {derived.budgetAlerts.map((a, i) => (
+              <span key={a.cat}>{i > 0 ? ", " : " "}{a.cat} {a.over ? "is over budget" : `is at ${a.pct.toFixed(0)}%`}</span>
+            ))}.
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 gap-5">
+        {EXPENSE_CATEGORIES.map(cat => {
+          const budget = data.budgets[cat] || 0;
+          const spent = derived.spendByCategory[cat] || 0;
+          const pct = budget > 0 ? (spent / budget) * 100 : 0;
+          const over = spent > budget && budget > 0;
+          return (
+            <Card key={cat} className="p-5">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{CATEGORY_META[cat].icon}</span>
+                  <span className="font-medium text-slate-700 text-sm">{cat}</span>
+                </div>
+                <button onClick={() => openEdit(cat)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Edit</button>
+              </div>
+              <ProgressBar pct={pct} color={over ? "#e11d48" : CATEGORY_META[cat].color} />
+              <div className="flex items-center justify-between mt-2 text-xs">
+                <span className={over ? "text-rose-600 font-medium" : "text-slate-500"}>{fmtCurrency(spent, { decimals: false })} spent</span>
+                <span className="text-slate-400">of {fmtCurrency(budget, { decimals: false })}</span>
+              </div>
+              {over && <div className="mt-2"><Pill tone="red">Over budget by {fmtCurrency(spent - budget, { decimals: false })}</Pill></div>}
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-slate-700">Spending Trends</h3>
+          <select className={inputClass + " max-w-[220px]"} value={trendCat} onChange={e => setTrendCat(e.target.value)}>
+            {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        {trendLabels.length === 0 ? (
+          <div className="text-sm text-slate-400 py-10 text-center">Not enough history yet.</div>
+        ) : (
+          <BarChartCanvas labels={trendLabels} values={trendValues} color={CATEGORY_META[trendCat].color} />
+        )}
+      </Card>
+
+      <Modal open={!!editCat} onClose={() => setEditCat(null)} title={"Edit Budget — " + editCat}>
+        <Field label="Monthly limit ($)">
+          <input type="number" className={inputClass} value={editVal} onChange={e => setEditVal(e.target.value)} autoFocus />
+        </Field>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="secondary" onClick={() => setEditCat(null)}>Cancel</Button>
+          <Button onClick={saveEdit}>Save</Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/* ============================== TRANSACTIONS ============================== */
+
+function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
+  const blank = { date: "2026-07-27", accountId: accounts[0]?.id || "", merchant: "", category: "Other", amount: "", notes: "", person: "Joint" };
+  const [form, setForm] = useState(initial || blank);
+  useEffect(() => { setForm(initial || blank); }, [initial, open]);
+
+  const onMerchantChange = (val) => {
+    let next = { ...form, merchant: val };
+    if (!initial) {
+      const match = (rules || []).find(r => val.toLowerCase().includes(r.keyword.toLowerCase()));
+      if (match) next.category = match.category;
+    }
+    setForm(next);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.merchant || !form.amount) return;
+    onSave({ ...form, amount: parseFloat(form.amount) });
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial ? "Edit Transaction" : "Add Transaction"}>
+      <form onSubmit={submit}>
+        <Field label="Merchant">
+          <input className={inputClass} value={form.merchant} onChange={e => onMerchantChange(e.target.value)} required />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount ($, negative = expense)">
+            <input type="number" step="0.01" className={inputClass} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
+          </Field>
+          <Field label="Date">
+            <input type="date" className={inputClass} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Category">
+            <select className={inputClass} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+              {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Account">
+            <select className={inputClass} value={form.accountId} onChange={e => setForm({ ...form, accountId: e.target.value })}>
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Person">
+          <select className={inputClass} value={form.person || "Joint"} onChange={e => setForm({ ...form, person: e.target.value })}>
+            {PEOPLE.map(p => <option key={p} value={p}>{PEOPLE_META[p].icon} {p}</option>)}
+          </select>
+        </Field>
+        <Field label="Notes (optional)">
+          <input className={inputClass} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+        </Field>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
+          <Button type="submit">Save Transaction</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function RulesPanel({ rules, actions }) {
+  const [open, setOpen] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [category, setCategory] = useState("Other");
+
+  const addRule = () => {
+    if (!keyword.trim()) return;
+    actions.addRule({ id: uid(), keyword: keyword.trim(), category });
+    setKeyword("");
+  };
+
+  return (
+    <Card className="p-4">
+      <button className="w-full flex items-center justify-between text-sm font-semibold text-slate-700" onClick={() => setOpen(o => !o)}>
+        <span>⚙️ Auto-Categorization Rules ({(rules || []).length})</span>
+        <span className="text-slate-400">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="mt-4 space-y-3">
+          <p className="text-xs text-slate-400">New transactions whose merchant contains a keyword are auto-categorized. Use "Apply to existing" to re-run rules on your current transactions.</p>
+          <div className="space-y-2">
+            {(rules || []).map(r => (
+              <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+                <span className="text-slate-600">If merchant contains <span className="font-semibold text-slate-800">"{r.keyword}"</span> → {CATEGORY_META[r.category]?.icon} {r.category}</span>
+                <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteRule(r.id)}>Remove</button>
+              </div>
+            ))}
+            {(rules || []).length === 0 && <div className="text-sm text-slate-400">No rules yet.</div>}
+          </div>
+          <div className="flex flex-wrap gap-2 items-center pt-2 border-t border-slate-100">
+            <input placeholder="Keyword, e.g. Starbucks" className={inputClass + " max-w-[200px]"} value={keyword} onChange={e => setKeyword(e.target.value)} />
+            <select className={inputClass + " max-w-[200px]"} value={category} onChange={e => setCategory(e.target.value)}>
+              {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={addRule}>+ Add Rule</Button>
+            <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={actions.applyRules}>Apply to existing transactions</Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Transactions({ data, actions }) {
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("All");
+  const [acctFilter, setAcctFilter] = useState("All");
+  const [personFilter, setPersonFilter] = useState("All");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [limit, setLimit] = useState(40);
+
+  const filtered = useMemo(() => {
+    return data.transactions.filter(t => {
+      if (search && !t.merchant.toLowerCase().includes(search.toLowerCase())) return false;
+      if (catFilter !== "All" && t.category !== catFilter) return false;
+      if (acctFilter !== "All" && t.accountId !== acctFilter) return false;
+      if (personFilter !== "All" && (t.person || "Joint") !== personFilter) return false;
+      return true;
+    });
+  }, [data.transactions, search, catFilter, acctFilter, personFilter]);
+
+  const accountsById = Object.fromEntries(data.accounts.map(a => [a.id, a]));
+
+  const openAdd = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (t) => { setEditing(t); setModalOpen(true); };
+
+  const save = (form) => {
+    if (editing) actions.updateTransaction({ ...form, id: editing.id });
+    else actions.addTransaction({ ...form, id: uid() });
+    setModalOpen(false);
+  };
+
+  return (
+    <div className="p-8 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Transactions</h1>
+          <p className="text-slate-500 text-sm mt-1">{filtered.length} transactions</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => exportTransactionsCSV(filtered, accountsById)}>⬇ Export CSV</Button>
+          <Button onClick={openAdd}>+ Add Transaction</Button>
+        </div>
+      </div>
+
+      <RulesPanel rules={data.rules} actions={actions} />
+
+      <Card className="p-4 flex flex-wrap gap-3 items-center">
+        <input placeholder="Search merchant..." className={inputClass + " max-w-xs"} value={search} onChange={e => setSearch(e.target.value)} />
+        <select className={inputClass + " max-w-[200px]"} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+          <option value="All">All Categories</option>
+          {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className={inputClass + " max-w-[200px]"} value={acctFilter} onChange={e => setAcctFilter(e.target.value)}>
+          <option value="All">All Accounts</option>
+          {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select className={inputClass + " max-w-[160px]"} value={personFilter} onChange={e => setPersonFilter(e.target.value)}>
+          <option value="All">Everyone</option>
+          {PEOPLE.map(p => <option key={p} value={p}>{PEOPLE_META[p].icon} {p}</option>)}
+        </select>
+        {(search || catFilter !== "All" || acctFilter !== "All" || personFilter !== "All") && (
+          <button className="text-xs text-indigo-600 font-medium" onClick={() => { setSearch(""); setCatFilter("All"); setAcctFilter("All"); setPersonFilter("All"); }}>Clear filters</button>
+        )}
+      </Card>
+
+      <Card className="overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+            <tr>
+              <th className="text-left px-5 py-3 font-medium">Merchant</th>
+              <th className="text-left px-5 py-3 font-medium">Category</th>
+              <th className="text-left px-5 py-3 font-medium">Person</th>
+              <th className="text-left px-5 py-3 font-medium">Account</th>
+              <th className="text-left px-5 py-3 font-medium">Date</th>
+              <th className="text-right px-5 py-3 font-medium">Amount</th>
+              <th className="px-5 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.slice(0, limit).map(t => (
+              <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50 group">
+                <td className="px-5 py-3 font-medium text-slate-700 flex items-center gap-2">
+                  <span>{CATEGORY_META[t.category]?.icon}</span>{t.merchant}
+                </td>
+                <td className="px-5 py-3"><Pill tone="slate">{t.category}</Pill></td>
+                <td className="px-5 py-3 text-slate-500">{PEOPLE_META[t.person || "Joint"].icon} {t.person || "Joint"}</td>
+                <td className="px-5 py-3 text-slate-500">{accountsById[t.accountId]?.name || "—"}</td>
+                <td className="px-5 py-3 text-slate-500">{fmtDate(t.date)}</td>
+                <td className={"px-5 py-3 text-right font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                  {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                </td>
+                <td className="px-5 py-3 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                  <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openEdit(t)}>Edit</button>
+                  <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan="7" className="text-center py-10 text-slate-400">No transactions match your filters.</td></tr>
+            )}
+          </tbody>
+        </table>
+        {filtered.length > limit && (
+          <div className="text-center py-4 border-t border-slate-100">
+            <button className="text-sm text-indigo-600 font-medium" onClick={() => setLimit(l => l + 40)}>Load more</button>
+          </div>
+        )}
+      </Card>
+
+      <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} accounts={data.accounts} rules={data.rules} />
+    </div>
+  );
+}
+
+/* ============================== SUBSCRIPTIONS ============================== */
+
+function Subscriptions({ data, actions }) {
+  const active = data.subscriptions.filter(s => s.active);
+  const cancelled = data.subscriptions.filter(s => !s.active);
+  const monthlyTotal = active.reduce((s, x) => s + x.amount, 0);
+  const yearlyTotal = monthlyTotal * 12;
+
+  const priceIncreases = active.filter(s => s.priceHistory.length > 1);
+  const cancelledMonthlySavings = cancelled.reduce((s, x) => s + x.amount, 0);
+
+  return (
+    <div className="p-8 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Subscriptions &amp; Bills</h1>
+        <p className="text-slate-500 text-sm mt-1">Recurring charges detected across your accounts.</p>
+      </div>
+
+      <div className="grid grid-cols-4 gap-5">
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Active Subscriptions</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{active.length}</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Monthly Cost</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(monthlyTotal)}</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Projected Yearly Cost</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(yearlyTotal, { decimals: false })}</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Saved by Cancelling</div>
+          <div className="text-2xl font-bold text-emerald-600 mt-1">{fmtCurrency(cancelledMonthlySavings)}/mo</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">{fmtCurrency(cancelledMonthlySavings * 12, { decimals: false })}/yr</div>
+        </Card>
+      </div>
+
+      {priceIncreases.length > 0 && (
+        <Card className="p-5 border-amber-200 bg-amber-50/50">
+          <h3 className="font-semibold text-amber-800 text-sm mb-2">⚠️ Price increases detected</h3>
+          {priceIncreases.map(s => {
+            const prev = s.priceHistory[s.priceHistory.length - 2];
+            const cur = s.priceHistory[s.priceHistory.length - 1];
+            return (
+              <div key={s.id} className="text-sm text-amber-700">
+                {s.merchant} increased from {fmtCurrency(prev.amount)} to {fmtCurrency(cur.amount)}/mo on {fmtDate(cur.date)}.
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      <Card className="p-6">
+        <h3 className="font-semibold text-slate-700 mb-4">Active</h3>
+        <div className="space-y-3">
+          {active.map(s => (
+            <div key={s.id} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-lg">🔁</div>
+                <div>
+                  <div className="text-sm font-medium text-slate-700">{s.merchant}</div>
+                  <div className="text-xs text-slate-400">Bills on the {s.dayOfMonth}{s.dayOfMonth === 1 ? "st" : "th"} · {s.category}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-sm font-semibold text-slate-700">{fmtCurrency(s.amount)}/mo</div>
+                <button className="text-xs text-rose-500 font-medium" onClick={() => actions.toggleSubscription(s.id)}>Cancel</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {cancelled.length > 0 && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-700 mb-4">Cancelled</h3>
+          <div className="space-y-3">
+            {cancelled.map(s => (
+              <div key={s.id} className="flex items-center justify-between opacity-60">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">🔁</div>
+                  <div className="text-sm font-medium text-slate-700 line-through">{s.merchant}</div>
+                </div>
+                <button className="text-xs text-indigo-600 font-medium" onClick={() => actions.toggleSubscription(s.id)}>Reactivate</button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ============================== CASH FLOW ============================== */
+
+function BillCalendar({ year, month, items, todayDay }) {
+  const dim = daysInMonth(year, month);
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= dim; d++) cells.push(d);
+  const itemsByDay = {};
+  items.forEach(it => { itemsByDay[it.dayOfMonth] = itemsByDay[it.dayOfMonth] || []; itemsByDay[it.dayOfMonth].push(it); });
+
+  return (
+    <div className="grid grid-cols-7 gap-2 text-xs">
+      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d} className="text-center font-medium text-slate-400 pb-1">{d}</div>)}
+      {cells.map((d, i) => (
+        <div key={i} className={"min-h-[76px] rounded-lg border p-1.5 " + (d === todayDay ? "border-indigo-400 bg-indigo-50" : "border-slate-100")}>
+          {d && <div className={"text-[11px] font-semibold " + (d === todayDay ? "text-indigo-600" : "text-slate-400")}>{d}</div>}
+          {d && (itemsByDay[d] || []).slice(0, 2).map((it, idx) => (
+            <div
+              key={idx}
+              title={it.merchant + " · " + fmtCurrency(it.amount)}
+              className={"mt-0.5 truncate rounded px-1 py-0.5 " + (it.income ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}
+            >
+              {it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant.split(" ")[0]}
+            </div>
+          ))}
+          {d && (itemsByDay[d] || []).length > 2 && (
+            <div className="text-[10px] text-slate-400 mt-0.5">+{itemsByDay[d].length - 2} more</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CashFlow({ data, derived }) {
+  const todayDay = 27;
+  const items = [
+    ...derived.recurringItems.map(b => ({ merchant: b.merchant, amount: b.amount, dayOfMonth: b.dayOfMonth, income: false })),
+    ...derived.monthTx.filter(t => t.category === "Income").map(t => ({ merchant: t.merchant, amount: t.amount, dayOfMonth: new Date(t.date + "T00:00:00").getDate(), income: true })),
+  ];
+  const upcoming = derived.recurringItems.filter(b => b.dayOfMonth > todayDay).sort((a, b) => a.dayOfMonth - b.dayOfMonth);
+
+  return (
+    <div className="p-8 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Cash Flow</h1>
+        <p className="text-slate-500 text-sm mt-1">What's safe to spend before your next bills hit, and when everything is due.</p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-5">
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-700 mb-1">Safe to Spend</h3>
+          <div className={"text-3xl font-bold mt-2 " + (derived.safeToSpend >= 0 ? "text-slate-800" : "text-rose-600")}>{fmtCurrency(derived.safeToSpend, { decimals: false })}</div>
+          <div className="mt-4 space-y-2 text-sm border-t border-slate-100 pt-4">
+            <div className="flex justify-between"><span className="text-slate-500">Checking balance</span><span className="font-medium text-slate-700">{fmtCurrency((derived.checkingAccount && derived.checkingAccount.balance) || 0, { decimals: false })}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Upcoming bills (rest of month)</span><span className="font-medium text-rose-600">-{fmtCurrency(derived.upcomingBillsRemaining, { decimals: false })}</span></div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Still due this month</div>
+            <div className="space-y-2 max-h-56 overflow-y-auto no-scrollbar">
+              {upcoming.length === 0 && <div className="text-sm text-slate-400">Nothing left — you're all paid up! 🎉</div>}
+              {upcoming.map((b, i) => (
+                <div key={i} className="flex justify-between text-sm">
+                  <span className="text-slate-600">{b.merchant}</span>
+                  <span className="font-medium text-slate-700">{fmtCurrency(b.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+        <Card className="col-span-2 p-6">
+          <h3 className="font-semibold text-slate-700 mb-3">July 2026 Bill Calendar</h3>
+          <BillCalendar year={2026} month={7} items={items} todayDay={todayDay} />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== GOALS ============================== */
+
+function GoalModal({ open, onClose, onSave, initial }) {
+  const blank = { name: "", icon: "🎯", target: "", current: "0", deadline: "2027-01-01", color: "#4f46e5" };
+  const [form, setForm] = useState(initial || blank);
+  useEffect(() => { setForm(initial || blank); }, [initial, open]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.name || !form.target) return;
+    onSave({ ...form, target: parseFloat(form.target), current: parseFloat(form.current) || 0 });
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial ? "Edit Goal" : "New Goal"}>
+      <form onSubmit={submit}>
+        <div className="grid grid-cols-4 gap-3">
+          <Field label="Icon">
+            <input className={inputClass} value={form.icon} onChange={e => setForm({ ...form, icon: e.target.value })} />
+          </Field>
+          <div className="col-span-3">
+            <Field label="Goal name">
+              <input className={inputClass} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+            </Field>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Target amount ($)">
+            <input type="number" className={inputClass} value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} required />
+          </Field>
+          <Field label="Current amount ($)">
+            <input type="number" className={inputClass} value={form.current} onChange={e => setForm({ ...form, current: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Target date">
+          <input type="date" className={inputClass} value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })} />
+        </Field>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
+          <Button type="submit">Save Goal</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Goals({ data, actions }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [contribTarget, setContribTarget] = useState(null);
+  const [contribVal, setContribVal] = useState("");
+
+  const openAdd = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (g) => { setEditing(g); setModalOpen(true); };
+  const save = (form) => {
+    if (editing) actions.updateGoal({ ...form, id: editing.id });
+    else actions.addGoal({ ...form, id: uid() });
+    setModalOpen(false);
+  };
+
+  const submitContribution = () => {
+    const v = parseFloat(contribVal);
+    if (!isNaN(v) && v !== 0) actions.contributeToGoal(contribTarget.id, v);
+    setContribTarget(null); setContribVal("");
+  };
+
+  return (
+    <div className="p-8 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Goals</h1>
+          <p className="text-slate-500 text-sm mt-1">Track progress toward what matters.</p>
+        </div>
+        <Button onClick={openAdd}>+ New Goal</Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-5">
+        {data.goals.map(g => {
+          const pct = g.target > 0 ? (g.current / g.target) * 100 : 0;
+          const daysLeft = Math.ceil((new Date(g.deadline) - new Date("2026-07-27")) / 86400000);
+          return (
+            <Card key={g.id} className="p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl" style={{ background: g.color + "20" }}>{g.icon}</div>
+                  <div>
+                    <div className="font-semibold text-slate-700">{g.name}</div>
+                    <div className="text-xs text-slate-400">{daysLeft > 0 ? `${daysLeft} days left` : "Past deadline"} · Target {fmtDate(g.deadline)}</div>
+                  </div>
+                </div>
+                <button onClick={() => openEdit(g)} className="text-xs text-indigo-600 font-medium">Edit</button>
+              </div>
+              <ProgressBar pct={pct} color={g.color} />
+              <div className="flex items-center justify-between mt-2 text-sm">
+                <span className="font-semibold text-slate-700">{fmtCurrency(g.current, { decimals: false })}</span>
+                <span className="text-slate-400">of {fmtCurrency(g.target, { decimals: false })} ({pct.toFixed(0)}%)</span>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={() => { setContribTarget(g); setContribVal(""); }}>+ Add Funds</Button>
+                <Button variant="danger" className="text-xs px-3 py-1.5" onClick={() => actions.deleteGoal(g.id)}>Delete</Button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <GoalModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} />
+
+      <Modal open={!!contribTarget} onClose={() => setContribTarget(null)} title={"Add Funds — " + (contribTarget?.name || "")}>
+        <Field label="Amount ($)">
+          <input type="number" className={inputClass} value={contribVal} onChange={e => setContribVal(e.target.value)} autoFocus />
+        </Field>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="secondary" onClick={() => setContribTarget(null)}>Cancel</Button>
+          <Button onClick={submitContribution}>Add</Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/* ============================== INVESTMENTS & DEBT PAYOFF ============================== */
+
+function InvestmentAllocation({ investments }) {
+  if (!investments || investments.length === 0) return null;
+  const byCategory = {};
+  investments.forEach(h => { byCategory[h.category] = (byCategory[h.category] || 0) + h.value; });
+  const total = Object.values(byCategory).reduce((s, v) => s + v, 0) || 1;
+  const entries = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+  const labels = entries.map(e => e[0]);
+  const values = entries.map(e => e[1]);
+  const colors = labels.map(l => (INVESTMENT_CATEGORY_META[l] || { color: "#64748b" }).color);
+
+  return (
+    <Card className="p-6">
+      <h3 className="font-semibold text-slate-700 mb-4">Investment Allocation</h3>
+      <div className="grid grid-cols-2 gap-6 items-center">
+        <DoughnutChartCanvas labels={labels} values={values} colors={colors} height={190} />
+        <div className="space-y-2">
+          {entries.map(([cat, val]) => (
+            <div key={cat}>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="flex items-center gap-1.5 text-slate-600">
+                  <span className="w-2 h-2 rounded-full inline-block" style={{ background: (INVESTMENT_CATEGORY_META[cat] || {}).color || "#64748b" }}></span>
+                  {cat}
+                </span>
+                <span className="font-medium text-slate-700">{fmtCurrency(val, { decimals: false })} ({((val / total) * 100).toFixed(0)}%)</span>
+              </div>
+              <ProgressBar pct={(val / total) * 100} color={(INVESTMENT_CATEGORY_META[cat] || {}).color} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function DebtPayoffPlanner({ debtAccounts }) {
+  const [extra, setExtra] = useState(200);
+  const [strategy, setStrategy] = useState("avalanche");
+
+  const payable = debtAccounts.filter(a => a.apr != null);
+  if (payable.length === 0) return null;
+
+  const result = useMemo(() => simulatePayoff(payable, extra, strategy), [JSON.stringify(payable), extra, strategy]);
+  const payoffDate = useMemo(() => {
+    const d = new Date("2026-07-27T00:00:00");
+    d.setMonth(d.getMonth() + result.months);
+    return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  }, [result.months]);
+  const scheduleLabels = result.schedule.map((_, i) => "M" + i);
+
+  return (
+    <Card className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-slate-700">Debt Payoff Planner</h3>
+        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+          <button onClick={() => setStrategy("avalanche")} className={"text-xs px-3 py-1.5 rounded-md font-medium " + (strategy === "avalanche" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500")}>Avalanche</button>
+          <button onClick={() => setStrategy("snowball")} className={"text-xs px-3 py-1.5 rounded-md font-medium " + (strategy === "snowball" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500")}>Snowball</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-5">
+        <div>
+          <Field label="Extra monthly payment ($)">
+            <input type="number" className={inputClass} value={extra} onChange={e => setExtra(Math.max(0, parseFloat(e.target.value) || 0))} />
+          </Field>
+          <div className="space-y-2 text-sm mt-4">
+            <div className="flex justify-between"><span className="text-slate-500">Debt-free by</span><span className="font-semibold text-slate-700">{payoffDate}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Months to pay off</span><span className="font-semibold text-slate-700">{result.months}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Total interest paid</span><span className="font-semibold text-rose-600">{fmtCurrency(result.totalInterest, { decimals: false })}</span></div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Payoff order ({strategy})</div>
+            <ol className="text-sm text-slate-600 list-decimal list-inside space-y-1">
+              {result.payoffOrder.map((name, i) => <li key={i}>{name}</li>)}
+            </ol>
+          </div>
+        </div>
+        <div className="col-span-2">
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Combined balance over time</div>
+          <LineChartCanvas labels={scheduleLabels} values={result.schedule.map(v => Math.round(v))} height={220} />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/* ============================== ACCOUNTS ============================== */
+
+function AccountModal({ open, onClose, onSave, initial }) {
+  const blank = { name: "", institution: "", type: "checking", balance: "", apr: "" };
+  const [form, setForm] = useState(initial || blank);
+  useEffect(() => { setForm(initial || blank); }, [initial, open]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.name) return;
+    onSave({ ...form, balance: parseFloat(form.balance) || 0, apr: form.apr === "" ? undefined : parseFloat(form.apr) });
+  };
+
+  const showApr = form.type === "credit" || form.type === "loan";
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial ? "Edit Account" : "Add Account"}>
+      <form onSubmit={submit}>
+        <Field label="Account name">
+          <input className={inputClass} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+        </Field>
+        <Field label="Institution">
+          <input className={inputClass} value={form.institution} onChange={e => setForm({ ...form, institution: e.target.value })} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Type">
+            <select className={inputClass} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
+              {Object.entries(ACCOUNT_TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Balance ($, negative for debt)">
+            <input type="number" step="0.01" className={inputClass} value={form.balance} onChange={e => setForm({ ...form, balance: e.target.value })} required />
+          </Field>
+        </div>
+        {showApr && (
+          <Field label="APR % (used by the Debt Payoff Planner)">
+            <input type="number" step="0.01" className={inputClass} value={form.apr} onChange={e => setForm({ ...form, apr: e.target.value })} />
+          </Field>
+        )}
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
+          <Button type="submit">Save Account</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Accounts({ data, actions, derived }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const openAdd = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (a) => { setEditing(a); setModalOpen(true); };
+  const save = (form) => {
+    if (editing) actions.updateAccount({ ...form, id: editing.id });
+    else actions.addAccount({ ...form, id: uid() });
+    setModalOpen(false);
+  };
+
+  const resetDemo = () => {
+    if (confirm("Reset all data back to the original demo dataset? This can't be undone.")) actions.resetDemo();
+  };
+
+  const assetAccounts = data.accounts.filter(a => a.balance >= 0);
+  const debtAccounts = data.accounts.filter(a => a.balance < 0);
+
+  return (
+    <div className="p-8 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Accounts</h1>
+          <p className="text-slate-500 text-sm mt-1">Manually managed — link states are simulated for this demo.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={resetDemo}>Reset Demo Data</Button>
+          <Button onClick={openAdd}>+ Add Account</Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-5">
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Net Worth</div>
+          <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(derived.netWorth, { decimals: false })}</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Total Assets</div>
+          <div className="text-2xl font-bold text-emerald-600 mt-1">{fmtCurrency(derived.totalAssets, { decimals: false })}</div>
+        </Card>
+        <Card className="p-5">
+          <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Total Debt</div>
+          <div className="text-2xl font-bold text-rose-600 mt-1">{fmtCurrency(derived.totalDebt, { decimals: false })}</div>
+        </Card>
+      </div>
+
+      <Card className="p-6">
+        <h3 className="font-semibold text-slate-700 mb-4">Assets</h3>
+        <div className="space-y-3">
+          {assetAccounts.map(a => (
+            <div key={a.id} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-lg">{ACCOUNT_TYPE_META[a.type].icon}</div>
+                <div>
+                  <div className="text-sm font-medium text-slate-700">{a.name}</div>
+                  <div className="text-xs text-slate-400">{a.institution} · {ACCOUNT_TYPE_META[a.type].label}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-sm font-semibold text-slate-700">{fmtCurrency(a.balance)}</div>
+                <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(a)}>Edit</button>
+                <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteAccount(a.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <InvestmentAllocation investments={data.investments} />
+
+      {debtAccounts.length > 0 && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-700 mb-4">Debts</h3>
+          <div className="space-y-3">
+            {debtAccounts.map(a => (
+              <div key={a.id} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center text-lg">{ACCOUNT_TYPE_META[a.type].icon}</div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-700">{a.name}</div>
+                    <div className="text-xs text-slate-400">{a.institution} · {ACCOUNT_TYPE_META[a.type].label}{a.apr != null ? ` · ${a.apr}% APR` : ""}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-sm font-semibold text-rose-600">{fmtCurrency(a.balance)}</div>
+                  <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(a)}>Edit</button>
+                  <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteAccount(a.id)}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <DebtPayoffPlanner debtAccounts={debtAccounts} />
+
+      <AccountModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} />
+    </div>
+  );
+}
+
+/* ============================== APP ROOT ============================== */
+
+function App() {
+  const [data, setData] = useState(loadData);
+  const [tab, setTab] = useState("dashboard");
+
+  useEffect(() => { saveData(data); }, [data]);
+
+  const derived = useDerived(data);
+
+  const actions = {
+    addTransaction: (t) => setData(d => ({ ...d, transactions: [t, ...d.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)) })),
+    updateTransaction: (t) => setData(d => ({ ...d, transactions: d.transactions.map(x => x.id === t.id ? t : x) })),
+    deleteTransaction: (id) => setData(d => ({ ...d, transactions: d.transactions.filter(x => x.id !== id) })),
+
+    setBudget: (cat, val) => setData(d => ({ ...d, budgets: { ...d.budgets, [cat]: val } })),
+
+    toggleSubscription: (id) => setData(d => ({ ...d, subscriptions: d.subscriptions.map(s => s.id === id ? { ...s, active: !s.active } : s) })),
+
+    addGoal: (g) => setData(d => ({ ...d, goals: [...d.goals, g] })),
+    updateGoal: (g) => setData(d => ({ ...d, goals: d.goals.map(x => x.id === g.id ? g : x) })),
+    deleteGoal: (id) => setData(d => ({ ...d, goals: d.goals.filter(x => x.id !== id) })),
+    contributeToGoal: (id, amt) => setData(d => ({ ...d, goals: d.goals.map(g => g.id === id ? { ...g, current: Math.max(0, g.current + amt) } : g) })),
+
+    addAccount: (a) => setData(d => ({ ...d, accounts: [...d.accounts, a] })),
+    updateAccount: (a) => setData(d => ({ ...d, accounts: d.accounts.map(x => x.id === a.id ? a : x) })),
+    deleteAccount: (id) => setData(d => ({ ...d, accounts: d.accounts.filter(x => x.id !== id) })),
+
+    addRule: (r) => setData(d => ({ ...d, rules: [...(d.rules || []), r] })),
+    deleteRule: (id) => setData(d => ({ ...d, rules: (d.rules || []).filter(r => r.id !== id) })),
+    applyRules: () => setData(d => ({
+      ...d,
+      transactions: d.transactions.map(t => {
+        const match = (d.rules || []).find(r => t.merchant.toLowerCase().includes(r.keyword.toLowerCase()));
+        return match ? { ...t, category: match.category } : t;
+      }),
+    })),
+
+    resetDemo: () => { const seeded = generateSeedData(); setData(seeded); },
+  };
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar tab={tab} setTab={setTab} netWorth={derived.netWorth} />
+      <main className="flex-1 overflow-y-auto">
+        {tab === "dashboard" && <Dashboard data={data} derived={derived} />}
+        {tab === "budgets" && <Budgets data={data} actions={actions} derived={derived} />}
+        {tab === "transactions" && <Transactions data={data} actions={actions} />}
+        {tab === "subscriptions" && <Subscriptions data={data} actions={actions} />}
+        {tab === "cashflow" && <CashFlow data={data} derived={derived} />}
+        {tab === "goals" && <Goals data={data} actions={actions} />}
+        {tab === "accounts" && <Accounts data={data} actions={actions} derived={derived} />}
+      </main>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
