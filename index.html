@@ -130,6 +130,108 @@ function exportTransactionsCSV(transactions, accountsById) {
   URL.revokeObjectURL(url);
 }
 
+/* ============================== STATEMENT IMPORT (CSV) ============================== */
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  const s = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field); field = "";
+    } else if (c === "\n") {
+      row.push(field); rows.push(row); row = []; field = "";
+    } else {
+      field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(cell => String(cell).trim() !== ""));
+}
+
+const IMPORT_COLUMN_ALIASES = {
+  date: ["date", "transaction date", "posted date", "post date", "trans date", "effective date"],
+  description: ["description", "desc", "merchant", "payee", "memo", "name", "transaction", "details"],
+  amount: ["amount", "amt", "transaction amount"],
+  debit: ["debit", "withdrawal", "withdrawals", "charge", "charges", "money out", "debit amount"],
+  credit: ["credit", "deposit", "deposits", "payment", "money in", "credit amount"],
+  category: ["category", "type"],
+};
+
+function guessColumnMapping(headers) {
+  const mapping = { date: null, description: null, amount: null, debit: null, credit: null, category: null };
+  const used = new Set();
+  Object.keys(IMPORT_COLUMN_ALIASES).forEach(field => {
+    const aliases = IMPORT_COLUMN_ALIASES[field];
+    let foundIdx = -1;
+    headers.forEach((h, idx) => {
+      if (used.has(idx) || foundIdx !== -1) return;
+      const hLower = String(h || "").trim().toLowerCase();
+      if (aliases.some(a => hLower === a || hLower.includes(a))) foundIdx = idx;
+    });
+    if (foundIdx !== -1) { mapping[field] = foundIdx; used.add(foundIdx); }
+  });
+  return mapping;
+}
+
+function parseAmountCell(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  let neg = false;
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  s = s.replace(/[$,]/g, "").trim();
+  if (s.startsWith("-")) { neg = true; s = s.slice(1); }
+  else if (s.startsWith("+")) { s = s.slice(1); }
+  const n = parseFloat(s);
+  if (isNaN(n)) return null;
+  return neg ? -n : n;
+}
+
+function parseDateCell(raw) {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let [, mm, dd, yy] = m;
+    if (yy.length === 2) yy = (parseInt(yy, 10) < 70 ? "20" : "19") + yy;
+    const mi = parseInt(mm, 10), di = parseInt(dd, 10);
+    if (mi >= 1 && mi <= 12 && di >= 1 && di <= 31) return `${yy}-${pad(mi)}-${pad(di)}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  return "";
+}
+
+function guessCategoryFromRules(merchant, rules, amount) {
+  const m = (rules || []).find(r => merchant.toLowerCase().includes(r.keyword.toLowerCase()));
+  if (m) return m.category;
+  return amount > 0 ? "Income" : "Other";
+}
+
+function isDuplicateTx(candidate, existingTx, accountId) {
+  return existingTx.some(t =>
+    t.accountId === accountId &&
+    t.date === candidate.date &&
+    Math.abs(t.amount - candidate.amount) < 0.005 &&
+    t.merchant.trim().toLowerCase() === candidate.merchant.trim().toLowerCase()
+  );
+}
+
 function mulberry32(seed) {
   return function () {
     seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
@@ -861,12 +963,13 @@ function Pill({ children, tone }) {
   return <span className={"text-xs font-medium px-2 py-0.5 rounded-full border " + (tones[tone] || tones.slate)}>{children}</span>;
 }
 
-function Modal({ open, onClose, title, children, wide }) {
+function Modal({ open, onClose, title, children, wide, size }) {
   if (!open) return null;
+  const widthClass = size === "xl" ? "max-w-5xl" : (wide || size === "lg") ? "max-w-2xl" : "max-w-md";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className={"bg-white rounded-2xl shadow-xl w-full " + (wide ? "max-w-2xl" : "max-w-md") + " max-h-[90vh] overflow-y-auto"}
+        className={"bg-white rounded-2xl shadow-xl w-full " + widthClass + " max-h-[90vh] overflow-y-auto"}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl">
@@ -890,14 +993,19 @@ function Field({ label, children }) {
 
 const inputClass = "w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent text-sm";
 
-function Button({ children, onClick, variant, className, type }) {
+function Button({ children, onClick, variant, className, type, disabled }) {
   const variants = {
     primary: "bg-indigo-600 hover:bg-indigo-700 text-white",
     secondary: "bg-slate-100 hover:bg-slate-200 text-slate-700",
     danger: "bg-rose-50 hover:bg-rose-100 text-rose-600",
   };
   return (
-    <button type={type || "button"} onClick={onClick} className={"px-4 py-2 rounded-lg text-sm font-medium transition-colors " + (variants[variant] || variants.primary) + " " + (className || "")}>
+    <button
+      type={type || "button"}
+      onClick={onClick}
+      disabled={disabled}
+      className={"px-4 py-2 rounded-lg text-sm font-medium transition-colors " + (variants[variant] || variants.primary) + " " + (disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : "") + " " + (className || "")}
+    >
       {children}
     </button>
   );
@@ -1637,6 +1745,7 @@ function CindyCreditCardRegister({ data, actions, cindyAccount }) {
   const [unclearedFirst, setUnclearedFirst] = useState(false);
   const [notes, setNotes] = useState(data.cindyRegisterNotes || "");
   const [viewingReceipt, setViewingReceipt] = useState(null);
+  const editFormRef = useRef(null);
 
   const allTx = useMemo(() => data.transactions.filter(t => t.accountId === cindyAccount.id), [data.transactions, cindyAccount.id]);
 
@@ -1685,6 +1794,7 @@ function CindyCreditCardRegister({ data, actions, cindyAccount }) {
       category: t.category === "Transfer" ? EXPENSE_CATEGORIES[0] : t.category,
       regType: cindyRegType(t), who: t.person || "Cynthia", receipt: t.receipt || null,
     });
+    if (editFormRef.current && typeof editFormRef.current.scrollIntoView === "function") editFormRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   const submit = () => {
@@ -1758,8 +1868,8 @@ function CindyCreditCardRegister({ data, actions, cindyAccount }) {
           <RegStat label="Uncleared Returns" value={fmtCurrency(unclearedReturns)} tone="sky" />
         </div>
 
-        <div className="border border-slate-200 rounded-xl p-3 md:p-4">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{form.id ? "Edit Transaction" : "Add Transaction"}</div>
+        <div ref={editFormRef} className={"border rounded-xl p-3 md:p-4 transition-colors " + (form.id ? "border-indigo-300 bg-indigo-50/40 ring-2 ring-indigo-100" : "border-slate-200")}>
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{form.id ? "✏️ Editing Transaction" : "Add Transaction"}</div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
             <input type="date" className={inputClass} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             <input placeholder="Description" className={inputClass + " col-span-2 md:col-span-2"} value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} />
@@ -1928,6 +2038,7 @@ function BankAccountRegister({ data, actions, account }) {
   const [unclearedFirst, setUnclearedFirst] = useState(false);
   const [notes, setNotes] = useState((data.registerNotes && data.registerNotes[account.id]) || "");
   const [viewingReceipt, setViewingReceipt] = useState(null);
+  const editFormRef = useRef(null);
 
   const opening = account.openingBalance || 0;
   const allTx = useMemo(() => data.transactions.filter(t => t.accountId === account.id), [data.transactions, account.id]);
@@ -1976,6 +2087,7 @@ function BankAccountRegister({ data, actions, account }) {
       id: t.id, date: t.date, desc: t.merchant, amount: String(Math.abs(t.amount)),
       category: t.category, direction: t.amount > 0 ? "deposit" : "withdrawal", receipt: t.receipt || null,
     });
+    if (editFormRef.current && typeof editFormRef.current.scrollIntoView === "function") editFormRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   const submit = () => {
@@ -2048,8 +2160,8 @@ function BankAccountRegister({ data, actions, account }) {
           <RegStat label="Uncleared Withdrawals" value={fmtCurrency(unclearedWithdrawals)} tone="amber" />
         </div>
 
-        <div className="border border-slate-200 rounded-xl p-3 md:p-4">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{form.id ? "Edit Transaction" : "Add Transaction"}</div>
+        <div ref={editFormRef} className={"border rounded-xl p-3 md:p-4 transition-colors " + (form.id ? "border-indigo-300 bg-indigo-50/40 ring-2 ring-indigo-100" : "border-slate-200")}>
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{form.id ? "✏️ Editing Transaction" : "Add Transaction"}</div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
             <input type="date" className={inputClass} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             <input placeholder="Description" className={inputClass + " col-span-2 md:col-span-2"} value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} />
@@ -2231,6 +2343,249 @@ function AccountsAndCards({ data, actions }) {
   );
 }
 
+const IMPORT_FIELD_LABELS = {
+  date: "Date", description: "Description", amount: "Amount (signed)",
+  debit: "Debit / Withdrawal", credit: "Credit / Deposit", category: "Category",
+};
+
+function ImportStatementModal({ open, onClose, data, actions }) {
+  const [step, setStep] = useState("upload");
+  const [accountId, setAccountId] = useState((data.accounts[0] && data.accounts[0].id) || "");
+  const [fileName, setFileName] = useState("");
+  const [rawRows, setRawRows] = useState([]);
+  const [hasHeader, setHasHeader] = useState(true);
+  const [mapping, setMapping] = useState({ date: null, description: null, amount: null, debit: null, credit: null, category: null });
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
+  const [importedCount, setImportedCount] = useState(0);
+  const fileInputRef = useRef(null);
+
+  const reset = () => {
+    setStep("upload"); setFileName(""); setRawRows([]); setHasHeader(true);
+    setMapping({ date: null, description: null, amount: null, debit: null, credit: null, category: null });
+    setRows([]); setError(""); setImportedCount(0);
+  };
+  const close = () => { reset(); onClose(); };
+
+  const openPicker = () => { setError(""); fileInputRef.current && fileInputRef.current.click(); };
+
+  const handleFile = (file) => {
+    if (!file) return;
+    setError("");
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = parseCSV(String(e.target.result || ""));
+        if (parsed.length === 0) { setError("That file doesn't look like a CSV — no rows found."); return; }
+        setRawRows(parsed);
+        setHasHeader(true);
+        setMapping(guessColumnMapping(parsed[0]));
+        setStep("mapping");
+      } catch (err) {
+        setError("Couldn't read that file. Make sure it's a CSV export from your bank or card issuer.");
+      }
+    };
+    reader.onerror = () => setError("Couldn't read that file.");
+    reader.readAsText(file);
+  };
+
+  const headers = rawRows[0] || [];
+  const columnCount = headers.length;
+  const mappingComplete = mapping.date != null && mapping.description != null && (mapping.amount != null || mapping.debit != null || mapping.credit != null);
+
+  const buildReview = () => {
+    const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+    const existing = data.transactions;
+    const built = dataRows.map((r, idx) => {
+      const dateRaw = mapping.date != null ? r[mapping.date] : "";
+      const desc = mapping.description != null ? r[mapping.description] : "";
+      let amount = null;
+      if (mapping.amount != null) {
+        amount = parseAmountCell(r[mapping.amount]);
+      } else {
+        const debit = mapping.debit != null ? parseAmountCell(r[mapping.debit]) : null;
+        const credit = mapping.credit != null ? parseAmountCell(r[mapping.credit]) : null;
+        if (debit != null && debit !== 0) amount = -Math.abs(debit);
+        else if (credit != null && credit !== 0) amount = Math.abs(credit);
+      }
+      const date = parseDateCell(dateRaw);
+      const merchant = String(desc || "").trim();
+      const rawCategory = mapping.category != null ? String(r[mapping.category] || "").trim() : "";
+      const category = CATEGORY_META[rawCategory] ? rawCategory : guessCategoryFromRules(merchant, data.rules, amount || 0);
+      const valid = !!date && !!merchant && amount != null && !isNaN(amount) && amount !== 0;
+      const duplicate = valid ? isDuplicateTx({ date, merchant, amount }, existing, accountId) : false;
+      return {
+        key: "imp_" + idx,
+        date, merchant, category,
+        amount: amount == null ? "" : String(Math.abs(amount).toFixed(2)),
+        direction: (amount || 0) >= 0 ? "deposit" : "withdrawal",
+        include: valid && !duplicate,
+        valid, duplicate,
+      };
+    });
+    setRows(built);
+    setStep("review");
+  };
+
+  const updateRow = (key, patch) => setRows(rs => rs.map(r => r.key === key ? { ...r, ...patch } : r));
+  const toggleAll = (val) => setRows(rs => rs.map(r => r.valid ? { ...r, include: val } : r));
+
+  const validRows = rows.filter(r => r.valid);
+  const includedCount = rows.filter(r => r.include).length;
+  const duplicateCount = rows.filter(r => r.duplicate).length;
+  const invalidCount = rows.length - validRows.length;
+
+  const doImport = () => {
+    const amt = (r) => parseFloat(r.amount) || 0;
+    const toImport = rows.filter(r => r.include && r.valid).map(r => ({
+      id: uid(), date: r.date, accountId, merchant: r.merchant.trim(), category: r.category,
+      amount: r.direction === "deposit" ? Math.abs(amt(r)) : -Math.abs(amt(r)),
+      person: defaultPersonForAccount(accountId), notes: "", cleared: true, receipt: null,
+    }));
+    if (toImport.length === 0) { setError("Select at least one transaction to import."); return; }
+    actions.importTransactions(toImport);
+    setImportedCount(toImport.length);
+    setStep("done");
+  };
+
+  const account = data.accounts.find(a => a.id === accountId);
+
+  return (
+    <Modal open={open} onClose={close} title="⬆ Import Statement" size="xl">
+      {step === "upload" && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500">Upload a CSV file exported from your bank or card issuer's online statement. You'll be able to review and edit every transaction before anything is added.</p>
+          <Field label="Import into account">
+            <select className={inputClass} value={accountId} onChange={e => setAccountId(e.target.value)}>
+              {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </Field>
+          <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center">
+            <div className="text-3xl mb-2">📄</div>
+            <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={e => handleFile(e.target.files[0])} />
+            <Button onClick={openPicker}>Choose CSV File…</Button>
+            <p className="text-xs text-slate-400 mt-3">Most banks let you export a statement or transaction range as a .csv file from their website.</p>
+          </div>
+          {error && <p className="text-sm text-rose-600">{error}</p>}
+        </div>
+      )}
+
+      {step === "mapping" && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500">
+            Loaded <span className="font-semibold text-slate-700">{fileName}</span> — {rawRows.length} row{rawRows.length === 1 ? "" : "s"}, {columnCount} column{columnCount === 1 ? "" : "s"}.
+            Confirm which column is which. We guessed based on your file's headers.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={hasHeader} onChange={e => setHasHeader(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+            First row is a header row (not a transaction)
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Object.keys(IMPORT_FIELD_LABELS).map(field => (
+              <Field key={field} label={IMPORT_FIELD_LABELS[field] + (field === "date" || field === "description" ? " *" : "")}>
+                <select
+                  className={inputClass}
+                  value={mapping[field] == null ? "" : mapping[field]}
+                  onChange={e => setMapping(m => ({ ...m, [field]: e.target.value === "" ? null : parseInt(e.target.value, 10) }))}
+                >
+                  <option value="">— Not in file —</option>
+                  {headers.map((h, idx) => <option key={idx} value={idx}>{h && h.trim() ? h : "Column " + (idx + 1)}</option>)}
+                </select>
+              </Field>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400">* Required. Provide either a single signed Amount column, or separate Debit/Credit columns.</p>
+          {error && <p className="text-sm text-rose-600">{error}</p>}
+          <div className="flex justify-between pt-2">
+            <Button variant="secondary" onClick={() => setStep("upload")}>Back</Button>
+            <Button onClick={buildReview} disabled={!mappingComplete}>Continue →</Button>
+          </div>
+        </div>
+      )}
+
+      {step === "review" && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-500">
+              Review each transaction before importing into <span className="font-semibold text-slate-700">{account ? account.name : ""}</span>.
+              {duplicateCount > 0 && <span className="text-amber-600"> {duplicateCount} possible duplicate{duplicateCount === 1 ? "" : "s"} unchecked.</span>}
+              {invalidCount > 0 && <span className="text-rose-500"> {invalidCount} row{invalidCount === 1 ? "" : "s"} couldn't be parsed and will be skipped.</span>}
+            </p>
+            <div className="flex gap-2 shrink-0">
+              <button className="text-xs text-indigo-600 font-medium" onClick={() => toggleAll(true)}>Select all</button>
+              <button className="text-xs text-indigo-600 font-medium" onClick={() => toggleAll(false)}>Select none</button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto border border-slate-100 rounded-xl max-h-[50vh]">
+            <table className="w-full text-sm min-w-[760px]">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide sticky top-0">
+                <tr>
+                  <th className="text-left px-2 py-2 font-medium w-8"></th>
+                  <th className="text-left px-2 py-2 font-medium">Date</th>
+                  <th className="text-left px-2 py-2 font-medium">Description</th>
+                  <th className="text-left px-2 py-2 font-medium">Category</th>
+                  <th className="text-left px-2 py-2 font-medium">Type</th>
+                  <th className="text-right px-2 py-2 font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.key} className={"border-t border-slate-100 " + (!r.valid ? "opacity-40" : r.duplicate ? "bg-amber-50/50" : "")}>
+                    <td className="px-2 py-2">
+                      <input type="checkbox" disabled={!r.valid} checked={r.include} onChange={e => updateRow(r.key, { include: e.target.checked })} className="w-4 h-4 accent-indigo-600" />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input type="date" disabled={!r.valid} className={inputClass + " min-w-[130px]"} value={r.date} onChange={e => updateRow(r.key, { date: e.target.value })} />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input disabled={!r.valid} className={inputClass + " min-w-[160px]"} value={r.merchant} onChange={e => updateRow(r.key, { merchant: e.target.value })} />
+                      {r.duplicate && <div className="text-[11px] text-amber-600 mt-0.5">Possible duplicate</div>}
+                    </td>
+                    <td className="px-2 py-2">
+                      <select disabled={!r.valid} className={inputClass + " min-w-[150px]"} value={r.category} onChange={e => updateRow(r.key, { category: e.target.value })}>
+                        {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-2 py-2">
+                      <select disabled={!r.valid} className={inputClass + " min-w-[110px]"} value={r.direction} onChange={e => updateRow(r.key, { direction: e.target.value })}>
+                        <option value="withdrawal">Withdrawal</option>
+                        <option value="deposit">Deposit</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <input type="number" step="0.01" min="0" disabled={!r.valid} className={inputClass + " text-right min-w-[100px]"} value={r.amount} onChange={e => updateRow(r.key, { amount: e.target.value })} />
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><td colSpan="6" className="text-center py-8 text-slate-400">No rows to review.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {error && <p className="text-sm text-rose-600">{error}</p>}
+          <div className="flex justify-between pt-2">
+            <Button variant="secondary" onClick={() => setStep("mapping")}>Back</Button>
+            <Button onClick={doImport}>Import {includedCount} Transaction{includedCount === 1 ? "" : "s"}</Button>
+          </div>
+        </div>
+      )}
+
+      {step === "done" && (
+        <div className="text-center py-6 space-y-3">
+          <div className="text-4xl">✅</div>
+          <div className="text-lg font-semibold text-slate-800">Imported {importedCount} transaction{importedCount === 1 ? "" : "s"}</div>
+          <p className="text-sm text-slate-500">Added to {account ? account.name : "your account"}. You can find them in the list and edit anything if needed.</p>
+          <Button onClick={close}>Done</Button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function Transactions({ data, actions }) {
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
@@ -2243,6 +2598,7 @@ function Transactions({ data, actions }) {
   const [presetAccountId, setPresetAccountId] = useState(null);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [sectionOpen, setSectionOpen] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
 
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
@@ -2283,13 +2639,16 @@ function Transactions({ data, actions }) {
             <p className="text-slate-500 text-sm mt-1">{filtered.length} transactions{!sectionOpen ? " · section collapsed" : ""}</p>
           </div>
         </button>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => setImportOpen(true)}>⬆ Import Statement</Button>
           <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => exportTransactionsCSV(filtered, accountsById)}>⬇ Export CSV</Button>
           <Button className="flex-1 sm:flex-none" onClick={openAdd}>+ Add Transaction</Button>
         </div>
       </div>
 
       <SectionNotes section="transactions" data={data} actions={actions} />
+
+      <ImportStatementModal open={importOpen} onClose={() => setImportOpen(false)} data={data} actions={actions} />
 
       {sectionOpen && (
         <React.Fragment>
@@ -3419,6 +3778,7 @@ function App() {
     addTransaction: (t) => setData(d => ({ ...d, transactions: [t, ...d.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)) })),
     updateTransaction: (t) => setData(d => ({ ...d, transactions: d.transactions.map(x => x.id === t.id ? t : x) })),
     deleteTransaction: (id) => setData(d => ({ ...d, transactions: d.transactions.filter(x => x.id !== id) })),
+    importTransactions: (arr) => setData(d => ({ ...d, transactions: [...arr, ...d.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)) })),
 
     setBudget: (cat, val) => setData(d => ({ ...d, budgets: { ...d.budgets, [cat]: val } })),
 
