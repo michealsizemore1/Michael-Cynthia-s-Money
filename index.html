@@ -32,7 +32,7 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 const STORAGE_KEY = "meridian_money_data_v5";
 const ACTIVE_TAB_KEY = "meridian_money_active_tab";
-const VALID_TABS = ["dashboard", "budgets", "transactions", "subscriptions", "cashflow", "goals", "accounts"];
+const VALID_TABS = ["dashboard", "budgets", "transactions", "subscriptions", "cashflow", "goals", "accounts", "ai"];
 
 const INVESTMENT_CATEGORY_META = {
   "US Stocks":            { color: "#4f46e5" },
@@ -295,6 +295,71 @@ function buildInsights(data, derived) {
   }
 
   return insights.slice(0, 5);
+}
+
+/* ---- Recurring-charge / unknown-subscription detector -----------------
+   Groups expense transactions by merchant, then flags groups that recur
+   across at least 2 different months at a fairly consistent dollar amount
+   (the signature of a subscription or fixed bill) and aren't already
+   tracked in data.subscriptions. Deliberately ignores day-to-day spending
+   like coffee or groceries, where the amount varies trip to trip. */
+function normalizeMerchantName(name) {
+  return (name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function detectUnknownSubscriptions(data) {
+  const known = (data.subscriptions || []).map(s => normalizeMerchantName(s.merchant));
+  const isKnown = (norm) => known.some(k => k && (norm.includes(k) || k.includes(norm)));
+
+  const groups = {};
+  (data.transactions || []).forEach(t => {
+    if (t.amount >= 0) return; // only charges/expenses
+    if (t.category === "Transfer" || t.category === "Income") return;
+    const norm = normalizeMerchantName(t.merchant);
+    if (!norm) return;
+    if (isKnown(norm)) return;
+    groups[norm] = groups[norm] || { merchant: t.merchant, category: t.category, txns: [] };
+    groups[norm].txns.push(t);
+  });
+
+  const candidates = [];
+  Object.values(groups).forEach(g => {
+    if (g.txns.length < 2) return;
+    const months = new Set(g.txns.map(t => monthKey(t.date)));
+    if (months.size < 2) return; // must recur across at least 2 different months
+
+    const amounts = g.txns.map(t => Math.abs(t.amount));
+    const avg = amounts.reduce((s, a) => s + a, 0) / amounts.length;
+    const maxDiff = Math.max(...amounts.map(a => Math.abs(a - avg)));
+    const consistent = maxDiff <= Math.max(1.5, avg * 0.08); // within 8% or $1.50, whichever is larger
+    if (!consistent) return;
+
+    // Require a roughly monthly cadence (20-45 days between charges on average) so we don't
+    // flag coincidentally-similar one-off purchases (e.g. two unrelated Sephora trips).
+    const sorted = [...g.txns].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const firstDate = new Date(sorted[0].date + "T00:00:00");
+    const lastDateObj = new Date(sorted[sorted.length - 1].date + "T00:00:00");
+    const spanDays = (lastDateObj - firstDate) / 86400000;
+    const avgGapDays = spanDays / (sorted.length - 1);
+    if (avgGapDays < 20 || avgGapDays > 45) return;
+
+    const desc = [...g.txns].sort((a, b) => (a.date < b.date ? 1 : -1));
+    const dayOfMonth = new Date(desc[0].date + "T00:00:00").getDate();
+
+    candidates.push({
+      id: "cand_" + normalizeMerchantName(g.merchant).replace(/\s+/g, "_"),
+      merchant: g.merchant,
+      category: g.category,
+      amount: Math.round(avg * 100) / 100,
+      dayOfMonth,
+      occurrences: g.txns.length,
+      months: months.size,
+      lastDate: desc[0].date,
+      person: desc[0].person || "Joint",
+    });
+  });
+
+  return candidates.sort((a, b) => b.occurrences - a.occurrences);
 }
 
 /* ============================== SEED DATA GENERATOR ============================== */
@@ -1013,6 +1078,7 @@ function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose }) {
     { id: "cashflow", label: "Cash Flow", icon: "💵" },
     { id: "goals", label: "Goals", icon: "🏆" },
     { id: "accounts", label: "Accounts", icon: "🏛️" },
+    { id: "ai", label: "AI Assistant", icon: "✨" },
   ];
 
   const selectTab = (id) => {
@@ -2929,11 +2995,308 @@ function Accounts({ data, actions, derived }) {
   );
 }
 
+/* ============================== AI ASSISTANT ============================== */
+
+const AI_KEY_STORAGE = "meridian_money_ai_key";
+const AI_MODEL_STORAGE = "meridian_money_ai_model";
+const AI_CHAT_STORAGE = "meridian_money_ai_chat";
+const AI_GREETING = "Hi! I'm your AI assistant for Michael & Cynthia's Money. Ask me anything about your budget, spending, or accounts — or ask me to scan your transactions for subscriptions you might not be tracking yet.";
+const ANTHROPIC_MODELS = [
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 — fast & cheap" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 — smarter, costs more" },
+];
+
+function buildFinancialContext(data, derived) {
+  const lines = [];
+  lines.push(`Today's date: July 27, 2026.`);
+  lines.push(`Net worth: ${fmtCurrency(derived.netWorth, { decimals: false })} (assets ${fmtCurrency(derived.totalAssets, { decimals: false })}, debt ${fmtCurrency(derived.totalDebt, { decimals: false })}).`);
+  lines.push(`Accounts: ${data.accounts.map(a => `${a.name} (${a.institution}, ${a.type}): ${fmtCurrency(a.balance, { decimals: false })}`).join("; ") || "none"}.`);
+  lines.push(`This month so far — income: ${fmtCurrency(derived.monthIncome, { decimals: false })}, expenses: ${fmtCurrency(derived.monthExpense, { decimals: false })}, savings rate: ${derived.savingsRate.toFixed(0)}%.`);
+  const catLines = Object.entries(derived.spendByCategory).sort((a, b) => b[1] - a[1])
+    .map(([cat, spent]) => `${cat}: spent ${fmtCurrency(spent, { decimals: false })}${data.budgets[cat] ? ` of ${fmtCurrency(data.budgets[cat], { decimals: false })} budget` : ""}`);
+  lines.push(`Spending by category this month: ${catLines.join("; ") || "none yet"}.`);
+  lines.push(`Safe to spend (checking balance minus remaining bills this month): ${fmtCurrency(derived.safeToSpend, { decimals: false })}.`);
+  const activeSubs = data.subscriptions.filter(s => s.active);
+  lines.push(`Active subscriptions/recurring bills (${activeSubs.length}): ${activeSubs.map(s => `${s.merchant} ${fmtCurrency(s.amount)}/mo (day ${s.dayOfMonth})`).join("; ") || "none"}.`);
+  lines.push(`Financial wellness score: ${derived.wellnessScore}/100.`);
+  if (data.goals.length > 0) {
+    lines.push(`Goals: ${data.goals.map(g => `${g.name}: ${fmtCurrency(g.current, { decimals: false })} of ${fmtCurrency(g.target, { decimals: false })}`).join("; ")}.`);
+  }
+  const recent = [...data.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 15);
+  lines.push(`15 most recent transactions: ${recent.map(t => `${t.date} ${t.merchant} ${fmtCurrency(t.amount)} (${t.category}${t.person ? ", " + t.person : ""})`).join("; ")}.`);
+  return lines.join("\n");
+}
+
+async function callClaude({ apiKey, model, system, messages }) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({ model, max_tokens: 1024, system, messages }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { const j = await res.json(); detail = (j.error && j.error.message) || JSON.stringify(j); } catch (e) {}
+    throw new Error(`Anthropic API error (${res.status}): ${detail || res.statusText}`);
+  }
+  const json = await res.json();
+  const text = (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+  return text || "(no response)";
+}
+
+function isSubscriptionScanIntent(msg) {
+  const m = msg.toLowerCase();
+  return /subscri/.test(m) && /(scan|search|check|find|look|detect)/.test(m);
+}
+
+function SubscriptionCandidateCard({ candidate, onAdd, onIgnore, status }) {
+  return (
+    <div className="border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <MerchantAvatar merchant={candidate.merchant} category={candidate.category} size={28} />
+        <div className="min-w-0">
+          <div className="font-medium text-slate-700 truncate">{candidate.merchant}</div>
+          <div className="text-xs text-slate-400">{fmtCurrency(candidate.amount)}/mo · seen {candidate.occurrences}x across {candidate.months} months · {candidate.category}</div>
+        </div>
+      </div>
+      {status === "added" ? (
+        <span className="text-xs text-emerald-600 font-medium shrink-0">✓ Added</span>
+      ) : status === "ignored" ? (
+        <span className="text-xs text-slate-400 font-medium shrink-0">Ignored</span>
+      ) : (
+        <div className="flex gap-2 shrink-0">
+          <button className="text-xs text-slate-500 font-medium" onClick={onIgnore}>Ignore</button>
+          <Button className="text-xs px-3 py-1.5" onClick={onAdd}>+ Add</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AIAssistant({ data, actions, derived }) {
+  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(AI_KEY_STORAGE) || ""; } catch (e) { return ""; } });
+  const [keyInput, setKeyInput] = useState("");
+  const [model, setModel] = useState(() => { try { return localStorage.getItem(AI_MODEL_STORAGE) || ANTHROPIC_MODELS[0].id; } catch (e) { return ANTHROPIC_MODELS[0].id; } });
+  const [messages, setMessages] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AI_CHAT_STORAGE);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [{ role: "assistant", content: AI_GREETING }];
+  });
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const scrollRef = useRef(null);
+
+  // Persist the conversation (capped) so it survives switching tabs or reloading the page.
+  useEffect(() => {
+    try { localStorage.setItem(AI_CHAT_STORAGE, JSON.stringify(messages.slice(-60))); } catch (e) {}
+  }, [messages]);
+
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, sending]);
+
+  // Candidate status is derived live from real data (not local state) so it stays correct
+  // no matter when this component mounts/unmounts, and across restored chat history.
+  const candidateStatusFor = (c) => {
+    const norm = normalizeMerchantName(c.merchant);
+    const isAdded = data.subscriptions.some(s => {
+      const sn = normalizeMerchantName(s.merchant);
+      return sn && (sn.includes(norm) || norm.includes(sn));
+    });
+    if (isAdded) return "added";
+    if ((data.dismissedSubscriptionCandidates || []).includes(c.id)) return "ignored";
+    return null;
+  };
+
+  const clearChat = () => {
+    if (!window.confirm("Clear this conversation?")) return;
+    setMessages([{ role: "assistant", content: AI_GREETING }]);
+  };
+
+  const saveKey = () => {
+    const k = keyInput.trim();
+    if (!k) return;
+    try { localStorage.setItem(AI_KEY_STORAGE, k); } catch (e) {}
+    setApiKey(k);
+    setKeyInput("");
+  };
+  const clearKey = () => {
+    if (!window.confirm("Remove your saved API key from this browser?")) return;
+    try { localStorage.removeItem(AI_KEY_STORAGE); } catch (e) {}
+    setApiKey("");
+  };
+  const changeModel = (id) => {
+    setModel(id);
+    try { localStorage.setItem(AI_MODEL_STORAGE, id); } catch (e) {}
+  };
+
+  const runSubscriptionScan = () => {
+    const dismissed = data.dismissedSubscriptionCandidates || [];
+    const all = detectUnknownSubscriptions(data);
+    const candidates = all.filter(c => !dismissed.includes(c.id));
+    const alreadyDismissedCount = all.length - candidates.length;
+    let text;
+    if (candidates.length === 0) {
+      text = alreadyDismissedCount > 0
+        ? "I scanned your transactions and didn't find any new recurring charges — everything that looked like a subscription is already tracked or was previously ignored."
+        : "I scanned your transactions and didn't find any recurring, fixed-amount charges that aren't already tracked as subscriptions.";
+    } else {
+      text = `I scanned your transactions and found ${candidates.length} recurring charge${candidates.length > 1 ? "s" : ""} that ${candidates.length > 1 ? "aren't" : "isn't"} tracked as a subscription yet — want me to add ${candidates.length > 1 ? "any of these" : "it"}?`;
+    }
+    setMessages(m => [...m, { role: "assistant", content: text, candidates: candidates.length > 0 ? candidates : undefined }]);
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    setError("");
+    const nextMessages = [...messages, { role: "user", content: text }];
+    setMessages(nextMessages);
+
+    if (isSubscriptionScanIntent(text)) {
+      runSubscriptionScan();
+      return;
+    }
+
+    if (!apiKey) {
+      setMessages(m => [...m, { role: "assistant", content: "Add your Anthropic API key above to chat with me about open-ended questions — or ask me to \"scan for subscriptions,\" which works without a key." }]);
+      return;
+    }
+
+    setSending(true);
+    try {
+      const system = "You are a helpful, concise personal finance assistant embedded in a couple's budgeting app called \"Michael & Cynthia's Money.\" Answer questions using the financial data below. Be specific and use real numbers from the data. Keep answers brief and conversational unless asked for detail.\n\n" + buildFinancialContext(data, derived);
+      const history = nextMessages
+        .filter(m => !m.candidates)
+        .slice(-20)
+        .map(m => ({ role: m.role, content: m.content }));
+      const reply = await callClaude({ apiKey, model, system, messages: history });
+      setMessages(m => [...m, { role: "assistant", content: reply }]);
+    } catch (e) {
+      setError(e.message || "Something went wrong talking to the AI.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const addCandidate = (c) => {
+    actions.addSubscription({
+      id: uid(), merchant: c.merchant, category: c.category, amount: c.amount,
+      dayOfMonth: c.dayOfMonth, active: true, priceHistory: [{ date: c.lastDate, amount: c.amount }], person: c.person,
+    });
+  };
+  const ignoreCandidate = (c) => {
+    actions.dismissSubscriptionCandidate(c.id);
+  };
+
+  return (
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
+      <div>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800">AI Assistant</h1>
+        <p className="text-slate-500 text-sm mt-1">Ask questions about your finances, or have it scan for untracked subscriptions.</p>
+      </div>
+
+      <SectionNotes section="ai" data={data} actions={actions} />
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm">
+            <span className="font-medium text-slate-700">Anthropic API key: </span>
+            {apiKey ? (
+              <span className="text-emerald-600 font-medium">Connected ({apiKey.slice(0, 8)}…)</span>
+            ) : (
+              <span className="text-slate-400">Not set — open-ended chat is unavailable until you add one</span>
+            )}
+          </div>
+          {apiKey && (
+            <div className="flex items-center gap-2">
+              <select className={inputClass + " max-w-[260px]"} value={model} onChange={e => changeModel(e.target.value)}>
+                {ANTHROPIC_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              <button className="text-xs text-rose-500 font-medium" onClick={clearKey}>Remove key</button>
+            </div>
+          )}
+        </div>
+        {!apiKey && (
+          <div className="mt-3 flex flex-wrap gap-2 items-center">
+            <input
+              type="password" placeholder="sk-ant-..." className={inputClass + " max-w-xs"}
+              value={keyInput} onChange={e => setKeyInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") saveKey(); }}
+            />
+            <Button className="text-xs px-3 py-2" onClick={saveKey}>Save Key</Button>
+          </div>
+        )}
+        <p className="text-xs text-slate-400 mt-2">
+          Your key is stored only in this browser's local storage and sent directly from your browser to Anthropic's API when you chat — it never passes through any server of ours. Don't use this on a shared or public computer. Get a key at{" "}
+          <span className="text-indigo-500">console.anthropic.com</span>.
+        </p>
+      </Card>
+
+      <Card className="overflow-hidden flex flex-col" style={{ height: "60vh", minHeight: 420 }}>
+        <div className="flex items-center justify-end px-4 pt-3">
+          <button type="button" className="text-xs text-slate-400 hover:text-rose-500 font-medium" onClick={clearChat}>Clear chat</button>
+        </div>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-5 space-y-4">
+          {messages.map((m, i) => (
+            <div key={i} className={"flex " + (m.role === "user" ? "justify-end" : "justify-start")}>
+              <div className={"max-w-[85%] space-y-2"}>
+                <div className={"rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap " + (m.role === "user" ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-700")}>
+                  {m.content}
+                </div>
+                {m.candidates && (
+                  <div className="space-y-2">
+                    {m.candidates.map(c => (
+                      <SubscriptionCandidateCard
+                        key={c.id} candidate={c} status={candidateStatusFor(c)}
+                        onAdd={() => addCandidate(c)} onIgnore={() => ignoreCandidate(c)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {sending && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl px-4 py-2.5 text-sm bg-slate-100 text-slate-400">Thinking…</div>
+            </div>
+          )}
+          {error && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl px-4 py-2.5 text-sm bg-rose-50 text-rose-600 border border-rose-200">{error}</div>
+            </div>
+          )}
+        </div>
+        <div className="border-t border-slate-100 p-3 flex gap-2 items-center flex-wrap">
+          <Button variant="secondary" className="text-xs px-3 py-2" onClick={runSubscriptionScan}>🔍 Scan for Subscriptions</Button>
+          <input
+            className={inputClass + " flex-1 min-w-[160px]"} placeholder="Ask about your budget, spending, accounts…"
+            value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") send(); }}
+          />
+          <Button className="text-xs px-4 py-2" onClick={send} disabled={sending}>Send</Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ============================== APP ROOT ============================== */
 
 const TAB_LABELS = {
   dashboard: "Dashboard", budgets: "Budgets", transactions: "Transactions",
   subscriptions: "Subscriptions & Bills", cashflow: "Cash Flow", goals: "Goals", accounts: "Accounts",
+  ai: "AI Assistant",
 };
 
 function App() {
@@ -2959,6 +3322,8 @@ function App() {
     setBudget: (cat, val) => setData(d => ({ ...d, budgets: { ...d.budgets, [cat]: val } })),
 
     toggleSubscription: (id) => setData(d => ({ ...d, subscriptions: d.subscriptions.map(s => s.id === id ? { ...s, active: !s.active } : s) })),
+    addSubscription: (s) => setData(d => ({ ...d, subscriptions: [...d.subscriptions, s] })),
+    dismissSubscriptionCandidate: (id) => setData(d => ({ ...d, dismissedSubscriptionCandidates: [...(d.dismissedSubscriptionCandidates || []), id] })),
 
     addGoal: (g) => setData(d => ({ ...d, goals: [...d.goals, g] })),
     updateGoal: (g) => setData(d => ({ ...d, goals: d.goals.map(x => x.id === g.id ? g : x) })),
@@ -3002,6 +3367,7 @@ function App() {
           {tab === "cashflow" && <CashFlow data={data} derived={derived} actions={actions} />}
           {tab === "goals" && <Goals data={data} actions={actions} />}
           {tab === "accounts" && <Accounts data={data} actions={actions} derived={derived} />}
+          {tab === "ai" && <AIAssistant data={data} actions={actions} derived={derived} />}
         </main>
       </div>
     </div>
