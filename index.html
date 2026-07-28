@@ -800,9 +800,9 @@ function Dashboard({ data, derived }) {
   const wellnessColor = derived.wellnessScore >= 80 ? "#16a34a" : derived.wellnessScore >= 60 ? "#4f46e5" : derived.wellnessScore >= 40 ? "#f59e0b" : "#e11d48";
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Good to see you, Michael &amp; Cynthia 👋</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800">Good to see you, Michael &amp; Cynthia 👋</h1>
         <p className="text-slate-500 text-sm mt-1">Here's your financial overview for {new Date("2026-07-27").toLocaleDateString("en-US", { month: "long", year: "numeric" })}.</p>
       </div>
 
@@ -817,7 +817,7 @@ function Dashboard({ data, derived }) {
         </Card>
       )}
 
-      <div className="grid grid-cols-5 gap-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 md:gap-5">
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Net Worth</div>
           <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(derived.netWorth, { decimals: false })}</div>
@@ -845,8 +845,8 @@ function Dashboard({ data, derived }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        <Card className="col-span-2 p-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <Card className="md:col-span-2 p-6">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold text-slate-700">Net Worth Trend</h3>
             <Pill tone="indigo">Last 7 months</Pill>
@@ -893,7 +893,7 @@ function Dashboard({ data, derived }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <Card className="p-6">
           <h3 className="font-semibold text-slate-700 mb-3">Financial Health</h3>
           <div className="flex items-center gap-4">
@@ -925,7 +925,7 @@ function Dashboard({ data, derived }) {
             ))}
           </div>
         </Card>
-        <Card className="col-span-2 p-6">
+        <Card className="md:col-span-2 p-6">
           <h3 className="font-semibold text-slate-700 mb-3">Insights</h3>
           {insights.length === 0 ? (
             <div className="text-sm text-slate-400 py-8 text-center">No notable changes to flag right now.</div>
@@ -942,20 +942,20 @@ function Dashboard({ data, derived }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        <Card className="col-span-2 p-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <Card className="md:col-span-2 p-6">
           <h3 className="font-semibold text-slate-700 mb-4">Recent Transactions</h3>
           <div className="space-y-3">
             {recentTx.map(t => (
-              <div key={t.id} className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div key={t.id} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <MerchantAvatar merchant={t.merchant} category={t.category} size={36} />
-                  <div>
-                    <div className="text-sm font-medium text-slate-700">{t.merchant}{t.receipt ? " 📎" : ""}</div>
-                    <div className="text-xs text-slate-400">{fmtDateShort(t.date)} · {t.category}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-700 truncate">{t.merchant}{t.receipt ? " 📎" : ""}</div>
+                    <div className="text-xs text-slate-400 truncate">{fmtDateShort(t.date)} · {t.category}</div>
                   </div>
                 </div>
-                <div className={"text-sm font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                <div className={"text-sm font-semibold shrink-0 " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
                   {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
                 </div>
               </div>
@@ -966,12 +966,12 @@ function Dashboard({ data, derived }) {
           <h3 className="font-semibold text-slate-700 mb-4">Upcoming Bills</h3>
           <div className="space-y-3">
             {upcomingBills.map((b, i) => (
-              <div key={i} className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium text-slate-700">{b.merchant}</div>
+              <div key={i} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700 truncate">{b.merchant}</div>
                   <div className="text-xs text-slate-400">Due on the {b.dayOfMonth}{b.dayOfMonth === 1 ? "st" : b.dayOfMonth <= 3 ? "rd" : "th"}</div>
                 </div>
-                <div className="text-sm font-semibold text-slate-700">{fmtCurrency(b.amount)}</div>
+                <div className="text-sm font-semibold text-slate-700 shrink-0">{fmtCurrency(b.amount)}</div>
               </div>
             ))}
           </div>
@@ -1002,13 +1002,13 @@ function Budgets({ data, actions, derived }) {
   };
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Budgets</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Budgets</h1>
           <p className="text-slate-500 text-sm mt-1">Monthly spending plan by category — {new Date("2026-07-27").toLocaleDateString("en-US", { month: "long", year: "numeric" })}.</p>
         </div>
-        <Card className="px-5 py-3">
+        <Card className="px-5 py-3 self-start sm:self-auto">
           <div className="text-xs text-slate-400">Total Budget Used</div>
           <div className="text-lg font-bold text-slate-800">{fmtCurrency(totalSpent, { decimals: false })} <span className="text-sm font-normal text-slate-400">/ {fmtCurrency(totalBudget, { decimals: false })}</span></div>
         </Card>
@@ -1025,7 +1025,7 @@ function Budgets({ data, actions, derived }) {
         </Card>
       )}
 
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
         {EXPENSE_CATEGORIES.map(cat => {
           const budget = data.budgets[cat] || 0;
           const spent = derived.spendByCategory[cat] || 0;
@@ -1052,7 +1052,7 @@ function Budgets({ data, actions, derived }) {
       </div>
 
       <Card className="p-6">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <h3 className="font-semibold text-slate-700">Spending Trends</h3>
           <select className={inputClass + " max-w-[220px]"} value={trendCat} onChange={e => setTrendCat(e.target.value)}>
             {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1117,7 +1117,7 @@ function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
         <Field label="Merchant">
           <input className={inputClass} value={form.merchant} onChange={e => onMerchantChange(e.target.value)} required />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Amount ($, negative = expense)">
             <input type="number" step="0.01" className={inputClass} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
           </Field>
@@ -1125,7 +1125,7 @@ function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
             <input type="date" className={inputClass} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Category">
             <select className={inputClass} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
               {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
@@ -1187,9 +1187,9 @@ function RulesPanel({ rules, actions }) {
           <p className="text-xs text-slate-400">New transactions whose merchant contains a keyword are auto-categorized. Use "Apply to existing" to re-run rules on your current transactions.</p>
           <div className="space-y-2">
             {(rules || []).map(r => (
-              <div key={r.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
+              <div key={r.id} className="flex items-center flex-wrap gap-2 justify-between text-sm bg-slate-50 rounded-lg px-3 py-2">
                 <span className="text-slate-600">If merchant contains <span className="font-semibold text-slate-800">"{r.keyword}"</span> → {CATEGORY_META[r.category]?.icon} {r.category}</span>
-                <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteRule(r.id)}>Remove</button>
+                <button className="text-xs text-rose-500 font-medium shrink-0" onClick={() => actions.deleteRule(r.id)}>Remove</button>
               </div>
             ))}
             {(rules || []).length === 0 && <div className="text-sm text-slate-400">No rules yet.</div>}
@@ -1240,15 +1240,15 @@ function Transactions({ data, actions }) {
   };
 
   return (
-    <div className="p-8 space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Transactions</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Transactions</h1>
           <p className="text-slate-500 text-sm mt-1">{filtered.length} transactions</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => exportTransactionsCSV(filtered, accountsById)}>⬇ Export CSV</Button>
-          <Button onClick={openAdd}>+ Add Transaction</Button>
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => exportTransactionsCSV(filtered, accountsById)}>⬇ Export CSV</Button>
+          <Button className="flex-1 sm:flex-none" onClick={openAdd}>+ Add Transaction</Button>
         </div>
       </div>
 
@@ -1274,7 +1274,8 @@ function Transactions({ data, actions }) {
       </Card>
 
       <Card className="overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[820px]">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
             <tr>
               <th className="text-left px-5 py-3 font-medium">Merchant</th>
@@ -1305,7 +1306,7 @@ function Transactions({ data, actions }) {
                 <td className={"px-5 py-3 text-right font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
                   {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
                 </td>
-                <td className="px-5 py-3 text-right opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                <td className="px-5 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
                   <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openEdit(t)}>Edit</button>
                   <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
                 </td>
@@ -1316,6 +1317,7 @@ function Transactions({ data, actions }) {
             )}
           </tbody>
         </table>
+        </div>
         {filtered.length > limit && (
           <div className="text-center py-4 border-t border-slate-100">
             <button className="text-sm text-indigo-600 font-medium" onClick={() => setLimit(l => l + 40)}>Load more</button>
@@ -1344,13 +1346,13 @@ function Subscriptions({ data, actions }) {
   const cancelledMonthlySavings = cancelled.reduce((s, x) => s + x.amount, 0);
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Subscriptions &amp; Bills</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800">Subscriptions &amp; Bills</h1>
         <p className="text-slate-500 text-sm mt-1">Recurring charges detected across your accounts.</p>
       </div>
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Active Subscriptions</div>
           <div className="text-2xl font-bold text-slate-800 mt-1">{active.length}</div>
@@ -1389,15 +1391,15 @@ function Subscriptions({ data, actions }) {
         <h3 className="font-semibold text-slate-700 mb-4">Active</h3>
         <div className="space-y-3">
           {active.map(s => (
-            <div key={s.id} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
-              <div className="flex items-center gap-3">
+            <div key={s.id} className="flex items-center flex-wrap gap-y-2 justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+              <div className="flex items-center gap-3 min-w-0">
                 <MerchantAvatar merchant={s.merchant} category={s.category} size={40} />
-                <div>
-                  <div className="text-sm font-medium text-slate-700">{s.merchant}</div>
-                  <div className="text-xs text-slate-400">Bills on the {s.dayOfMonth}{s.dayOfMonth === 1 ? "st" : "th"} · {s.category}</div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700 truncate">{s.merchant}</div>
+                  <div className="text-xs text-slate-400 truncate">Bills on the {s.dayOfMonth}{s.dayOfMonth === 1 ? "st" : "th"} · {s.category}</div>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 shrink-0">
                 <div className="text-sm font-semibold text-slate-700">{fmtCurrency(s.amount)}/mo</div>
                 <button className="text-xs text-rose-500 font-medium" onClick={() => actions.toggleSubscription(s.id)}>Cancel</button>
               </div>
@@ -1411,12 +1413,12 @@ function Subscriptions({ data, actions }) {
           <h3 className="font-semibold text-slate-700 mb-4">Cancelled</h3>
           <div className="space-y-3">
             {cancelled.map(s => (
-              <div key={s.id} className="flex items-center justify-between opacity-60">
-                <div className="flex items-center gap-3">
+              <div key={s.id} className="flex items-center flex-wrap gap-y-2 justify-between opacity-60">
+                <div className="flex items-center gap-3 min-w-0">
                   <MerchantAvatar merchant={s.merchant} category={s.category} size={40} />
-                  <div className="text-sm font-medium text-slate-700 line-through">{s.merchant}</div>
+                  <div className="text-sm font-medium text-slate-700 line-through truncate">{s.merchant}</div>
                 </div>
-                <button className="text-xs text-indigo-600 font-medium" onClick={() => actions.toggleSubscription(s.id)}>Reactivate</button>
+                <button className="text-xs text-indigo-600 font-medium shrink-0" onClick={() => actions.toggleSubscription(s.id)}>Reactivate</button>
               </div>
             ))}
           </div>
@@ -1438,25 +1440,27 @@ function BillCalendar({ year, month, items, todayDay }) {
   items.forEach(it => { itemsByDay[it.dayOfMonth] = itemsByDay[it.dayOfMonth] || []; itemsByDay[it.dayOfMonth].push(it); });
 
   return (
-    <div className="grid grid-cols-7 gap-2 text-xs">
-      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d} className="text-center font-medium text-slate-400 pb-1">{d}</div>)}
-      {cells.map((d, i) => (
-        <div key={i} className={"min-h-[76px] rounded-lg border p-1.5 " + (d === todayDay ? "border-indigo-400 bg-indigo-50" : "border-slate-100")}>
-          {d && <div className={"text-[11px] font-semibold " + (d === todayDay ? "text-indigo-600" : "text-slate-400")}>{d}</div>}
-          {d && (itemsByDay[d] || []).slice(0, 2).map((it, idx) => (
-            <div
-              key={idx}
-              title={it.merchant + " · " + fmtCurrency(it.amount)}
-              className={"mt-0.5 truncate rounded px-1 py-0.5 " + (it.income ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}
-            >
-              {it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant.split(" ")[0]}
-            </div>
-          ))}
-          {d && (itemsByDay[d] || []).length > 2 && (
-            <div className="text-[10px] text-slate-400 mt-0.5">+{itemsByDay[d].length - 2} more</div>
-          )}
-        </div>
-      ))}
+    <div className="overflow-x-auto">
+      <div className="grid grid-cols-7 gap-1.5 md:gap-2 text-xs min-w-[560px]">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d} className="text-center font-medium text-slate-400 pb-1">{d}</div>)}
+        {cells.map((d, i) => (
+          <div key={i} className={"min-h-[76px] rounded-lg border p-1.5 " + (d === todayDay ? "border-indigo-400 bg-indigo-50" : "border-slate-100")}>
+            {d && <div className={"text-[11px] font-semibold " + (d === todayDay ? "text-indigo-600" : "text-slate-400")}>{d}</div>}
+            {d && (itemsByDay[d] || []).slice(0, 2).map((it, idx) => (
+              <div
+                key={idx}
+                title={it.merchant + " · " + fmtCurrency(it.amount)}
+                className={"mt-0.5 truncate rounded px-1 py-0.5 " + (it.income ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}
+              >
+                {it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant.split(" ")[0]}
+              </div>
+            ))}
+            {d && (itemsByDay[d] || []).length > 2 && (
+              <div className="text-[10px] text-slate-400 mt-0.5">+{itemsByDay[d].length - 2} more</div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1470,13 +1474,13 @@ function CashFlow({ data, derived }) {
   const upcoming = derived.recurringItems.filter(b => b.dayOfMonth > todayDay).sort((a, b) => a.dayOfMonth - b.dayOfMonth);
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Cash Flow</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800">Cash Flow</h1>
         <p className="text-slate-500 text-sm mt-1">What's safe to spend before your next bills hit, and when everything is due.</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <Card className="p-6">
           <h3 className="font-semibold text-slate-700 mb-1">Safe to Spend</h3>
           <div className={"text-3xl font-bold mt-2 " + (derived.safeToSpend >= 0 ? "text-slate-800" : "text-rose-600")}>{fmtCurrency(derived.safeToSpend, { decimals: false })}</div>
@@ -1497,7 +1501,7 @@ function CashFlow({ data, derived }) {
             </div>
           </div>
         </Card>
-        <Card className="col-span-2 p-6">
+        <Card className="md:col-span-2 p-6">
           <h3 className="font-semibold text-slate-700 mb-3">July 2026 Bill Calendar</h3>
           <BillCalendar year={2026} month={7} items={items} todayDay={todayDay} />
         </Card>
@@ -1532,7 +1536,7 @@ function GoalModal({ open, onClose, onSave, initial }) {
             </Field>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Target amount ($)">
             <input type="number" className={inputClass} value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} required />
           </Field>
@@ -1573,16 +1577,16 @@ function Goals({ data, actions }) {
   };
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Goals</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Goals</h1>
           <p className="text-slate-500 text-sm mt-1">Track progress toward what matters.</p>
         </div>
-        <Button onClick={openAdd}>+ New Goal</Button>
+        <Button className="self-start sm:self-auto" onClick={openAdd}>+ New Goal</Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
         {data.goals.map(g => {
           const pct = g.target > 0 ? (g.current / g.target) * 100 : 0;
           const daysLeft = Math.ceil((new Date(g.deadline) - new Date("2026-07-27")) / 86400000);
@@ -1642,7 +1646,7 @@ function InvestmentAllocation({ investments }) {
   return (
     <Card className="p-6">
       <h3 className="font-semibold text-slate-700 mb-4">Investment Allocation</h3>
-      <div className="grid grid-cols-2 gap-6 items-center">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
         <DoughnutChartCanvas labels={labels} values={values} colors={colors} height={190} />
         <div className="space-y-2">
           {entries.map(([cat, val]) => (
@@ -1680,14 +1684,14 @@ function DebtPayoffPlanner({ debtAccounts }) {
 
   return (
     <Card className="p-6">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 className="font-semibold text-slate-700">Debt Payoff Planner</h3>
         <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
           <button onClick={() => setStrategy("avalanche")} className={"text-xs px-3 py-1.5 rounded-md font-medium " + (strategy === "avalanche" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500")}>Avalanche</button>
           <button onClick={() => setStrategy("snowball")} className={"text-xs px-3 py-1.5 rounded-md font-medium " + (strategy === "snowball" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500")}>Snowball</button>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div>
           <Field label="Extra monthly payment ($)">
             <input type="number" className={inputClass} value={extra} onChange={e => setExtra(Math.max(0, parseFloat(e.target.value) || 0))} />
@@ -1704,7 +1708,7 @@ function DebtPayoffPlanner({ debtAccounts }) {
             </ol>
           </div>
         </div>
-        <div className="col-span-2">
+        <div className="md:col-span-2">
           <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Combined balance over time</div>
           <LineChartCanvas labels={scheduleLabels} values={result.schedule.map(v => Math.round(v))} height={220} />
         </div>
@@ -1737,7 +1741,7 @@ function AccountModal({ open, onClose, onSave, initial }) {
         <Field label="Institution">
           <input className={inputClass} value={form.institution} onChange={e => setForm({ ...form, institution: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Type">
             <select className={inputClass} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
               {Object.entries(ACCOUNT_TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -1781,19 +1785,19 @@ function Accounts({ data, actions, derived }) {
   const debtAccounts = data.accounts.filter(a => a.balance < 0);
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 space-y-5 md:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Accounts</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Accounts</h1>
           <p className="text-slate-500 text-sm mt-1">Manually managed — link states are simulated for this demo.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={resetDemo}>Reset Demo Data</Button>
-          <Button onClick={openAdd}>+ Add Account</Button>
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={resetDemo}>Reset Demo Data</Button>
+          <Button className="flex-1 sm:flex-none" onClick={openAdd}>+ Add Account</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5">
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Net Worth</div>
           <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(derived.netWorth, { decimals: false })}</div>
@@ -1812,15 +1816,15 @@ function Accounts({ data, actions, derived }) {
         <h3 className="font-semibold text-slate-700 mb-4">Assets</h3>
         <div className="space-y-3">
           {assetAccounts.map(a => (
-            <div key={a.id} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-lg">{ACCOUNT_TYPE_META[a.type].icon}</div>
-                <div>
-                  <div className="text-sm font-medium text-slate-700">{a.name}</div>
-                  <div className="text-xs text-slate-400">{a.institution} · {ACCOUNT_TYPE_META[a.type].label}</div>
+            <div key={a.id} className="flex items-center flex-wrap gap-y-2 justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-lg shrink-0">{ACCOUNT_TYPE_META[a.type].icon}</div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-700 truncate">{a.name}</div>
+                  <div className="text-xs text-slate-400 truncate">{a.institution} · {ACCOUNT_TYPE_META[a.type].label}</div>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 shrink-0">
                 <div className="text-sm font-semibold text-slate-700">{fmtCurrency(a.balance)}</div>
                 <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(a)}>Edit</button>
                 <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteAccount(a.id)}>Delete</button>
@@ -1837,15 +1841,15 @@ function Accounts({ data, actions, derived }) {
           <h3 className="font-semibold text-slate-700 mb-4">Debts</h3>
           <div className="space-y-3">
             {debtAccounts.map(a => (
-              <div key={a.id} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center text-lg">{ACCOUNT_TYPE_META[a.type].icon}</div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-700">{a.name}</div>
-                    <div className="text-xs text-slate-400">{a.institution} · {ACCOUNT_TYPE_META[a.type].label}{a.apr != null ? ` · ${a.apr}% APR` : ""}</div>
+              <div key={a.id} className="flex items-center flex-wrap gap-y-2 justify-between border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center text-lg shrink-0">{ACCOUNT_TYPE_META[a.type].icon}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-700 truncate">{a.name}</div>
+                    <div className="text-xs text-slate-400 truncate">{a.institution} · {ACCOUNT_TYPE_META[a.type].label}{a.apr != null ? ` · ${a.apr}% APR` : ""}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 shrink-0">
                   <div className="text-sm font-semibold text-rose-600">{fmtCurrency(a.balance)}</div>
                   <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(a)}>Edit</button>
                   <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteAccount(a.id)}>Delete</button>
