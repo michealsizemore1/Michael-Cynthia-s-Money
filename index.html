@@ -59,6 +59,7 @@ const CATEGORY_META = {
   "Health & Fitness": { icon: "💪", color: "#22c55e" },
   "Travel":           { icon: "✈️", color: "#0ea5e9" },
   "Personal Care":    { icon: "🧴", color: "#d946ef" },
+  "Personal Support": { icon: "💝", color: "#f43f5e" },
   "Other":            { icon: "📦", color: "#64748b" },
   "Income":           { icon: "💰", color: "#16a34a" },
   "Transfer":         { icon: "↔️", color: "#94a3b8" },
@@ -77,7 +78,7 @@ const ACCOUNT_TYPE_META = {
 const DEFAULT_BUDGETS = {
   "Housing": 1800, "Groceries": 550, "Dining & Coffee": 300, "Transportation": 250,
   "Shopping": 300, "Entertainment": 120, "Subscriptions": 90, "Utilities": 220,
-  "Health & Fitness": 150, "Travel": 200, "Personal Care": 80, "Other": 100,
+  "Health & Fitness": 150, "Travel": 200, "Personal Care": 80, "Personal Support": 3500, "Other": 100,
 };
 
 /* ============================== UTILITIES ============================== */
@@ -472,14 +473,54 @@ function generateSeedData() {
   return { accounts, transactions, budgets: { ...DEFAULT_BUDGETS }, subscriptions, goals, netWorthHistory, recurringBills, rules, investments };
 }
 
+/* ---- Cindy's Credit Card Register -------------------------------------
+   Imported from the uploaded retirement-planner backup: that file had no
+   itemized credit card transactions, only a recurring "To Cindy" personal
+   support line ($3,466/mo). We bring that in as the register's transaction
+   history on a dedicated account, without touching any other saved data. */
+
+const CINDY_CC_ACCOUNT_ID = "acc_cindy_cc";
+const CINDY_CC_ACCOUNT_NAME = "Cindy's Credit Card";
+
+function buildCindyRegisterAdditions() {
+  const account = { id: CINDY_CC_ACCOUNT_ID, name: CINDY_CC_ACCOUNT_NAME, institution: "Discover", type: "credit", balance: -1180.45 };
+  const end = new Date("2026-07-27T00:00:00");
+  const months = [{ y: 2026, m: 4 }, { y: 2026, m: 5 }, { y: 2026, m: 6 }, { y: 2026, m: 7 }];
+  const transactions = [];
+  months.forEach(({ y, m }) => {
+    const day = Math.min(15, daysInMonth(y, m));
+    const iso = isoDate(y, m, day);
+    if (new Date(iso) > end) return;
+    transactions.push({
+      id: uid(), date: iso, accountId: CINDY_CC_ACCOUNT_ID, merchant: "To Cindy",
+      category: "Personal Support", amount: -3466, notes: "Imported from retirement-planner-backup-2026-07-28.json", person: "Cynthia",
+    });
+  });
+  return { account, transactions };
+}
+
+function ensureCindyRegister(data) {
+  const hasAccount = (data.accounts || []).some(a => a.id === CINDY_CC_ACCOUNT_ID || a.name === CINDY_CC_ACCOUNT_NAME);
+  if (hasAccount) return data;
+  const { account, transactions } = buildCindyRegisterAdditions();
+  return {
+    ...data,
+    accounts: [...(data.accounts || []), account],
+    transactions: [...transactions, ...(data.transactions || [])].sort((a, b) => (a.date < b.date ? 1 : -1)),
+    budgets: { ...(data.budgets || {}), "Personal Support": (data.budgets && data.budgets["Personal Support"]) || DEFAULT_BUDGETS["Personal Support"] },
+  };
+}
+
 function loadData() {
+  let data = null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) data = JSON.parse(raw);
   } catch (e) {}
-  const seeded = generateSeedData();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-  return seeded;
+  if (!data) data = generateSeedData();
+  data = ensureCindyRegister(data);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  return data;
 }
 
 function saveData(data) {
@@ -1081,11 +1122,11 @@ function Budgets({ data, actions, derived }) {
 
 /* ============================== TRANSACTIONS ============================== */
 
-function TransactionModal({ open, onClose, onSave, initial, accounts, rules }) {
-  const blank = { date: "2026-07-27", accountId: accounts[0]?.id || "", merchant: "", category: "Other", amount: "", notes: "", person: "Joint", receipt: null };
+function TransactionModal({ open, onClose, onSave, initial, accounts, rules, defaultAccountId }) {
+  const blank = { date: "2026-07-27", accountId: defaultAccountId || accounts[0]?.id || "", merchant: "", category: defaultAccountId === CINDY_CC_ACCOUNT_ID ? "Personal Support" : "Other", amount: "", notes: "", person: defaultAccountId === CINDY_CC_ACCOUNT_ID ? "Cynthia" : "Joint", receipt: null };
   const [form, setForm] = useState(initial || blank);
   const [receiptBusy, setReceiptBusy] = useState(false);
-  useEffect(() => { setForm(initial || blank); }, [initial, open]);
+  useEffect(() => { setForm(initial || blank); }, [initial, open, defaultAccountId]);
 
   const onMerchantChange = (val) => {
     let next = { ...form, merchant: val };
@@ -1218,6 +1259,7 @@ function Transactions({ data, actions }) {
   const [editing, setEditing] = useState(null);
   const [limit, setLimit] = useState(40);
   const [viewingReceipt, setViewingReceipt] = useState(null);
+  const [presetAccountId, setPresetAccountId] = useState(null);
 
   const filtered = useMemo(() => {
     return data.transactions.filter(t => {
@@ -1231,8 +1273,14 @@ function Transactions({ data, actions }) {
 
   const accountsById = Object.fromEntries(data.accounts.map(a => [a.id, a]));
 
-  const openAdd = () => { setEditing(null); setModalOpen(true); };
-  const openEdit = (t) => { setEditing(t); setModalOpen(true); };
+  const cindyAccount = data.accounts.find(a => a.id === CINDY_CC_ACCOUNT_ID || a.name === CINDY_CC_ACCOUNT_NAME);
+  const cindyTx = useMemo(() => {
+    if (!cindyAccount) return [];
+    return data.transactions.filter(t => t.accountId === cindyAccount.id).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [data.transactions, cindyAccount]);
+
+  const openAdd = (accountId) => { setEditing(null); setPresetAccountId(accountId || null); setModalOpen(true); };
+  const openEdit = (t) => { setEditing(t); setPresetAccountId(null); setModalOpen(true); };
 
   const save = (form) => {
     if (editing) actions.updateTransaction({ ...form, id: editing.id });
@@ -1326,7 +1374,62 @@ function Transactions({ data, actions }) {
         )}
       </Card>
 
-      <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} accounts={data.accounts} rules={data.rules} />
+      {cindyAccount && (
+        <Card className="overflow-hidden">
+          <div className="p-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100">
+            <div>
+              <h3 className="font-semibold text-slate-700">💳 Cindy's Credit Card Register</h3>
+              <p className="text-xs text-slate-400 mt-0.5">A dedicated register for {cindyAccount.name}, imported from the retirement-planner backup.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-sm">
+                <span className="text-slate-400">Balance </span>
+                <span className="font-semibold text-rose-600">{fmtCurrency(cindyAccount.balance)}</span>
+              </div>
+              <Button className="text-xs px-3 py-1.5" onClick={() => openAdd(cindyAccount.id)}>+ Add Charge</Button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-5 py-3 font-medium">Merchant</th>
+                  <th className="text-left px-5 py-3 font-medium">Category</th>
+                  <th className="text-left px-5 py-3 font-medium">Date</th>
+                  <th className="text-right px-5 py-3 font-medium">Amount</th>
+                  <th className="px-5 py-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cindyTx.map(t => (
+                  <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50 group">
+                    <td className="px-5 py-3 font-medium text-slate-700">
+                      <div className="flex items-center gap-2">
+                        <MerchantAvatar merchant={t.merchant} category={t.category} size={26} />
+                        <span>{t.merchant}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3"><Pill tone="slate">{t.category}</Pill></td>
+                    <td className="px-5 py-3 text-slate-500">{fmtDate(t.date)}</td>
+                    <td className={"px-5 py-3 text-right font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                      {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                    </td>
+                    <td className="px-5 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openEdit(t)}>Edit</button>
+                      <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+                {cindyTx.length === 0 && (
+                  <tr><td colSpan="5" className="text-center py-8 text-slate-400">No charges on this register yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} accounts={data.accounts} rules={data.rules} defaultAccountId={presetAccountId} />
 
       <Modal open={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title="Receipt">
         {viewingReceipt && <img src={viewingReceipt} className="w-full rounded-lg" alt="Receipt" />}
@@ -1912,7 +2015,7 @@ function App() {
       }),
     })),
 
-    resetDemo: () => { const seeded = generateSeedData(); setData(seeded); },
+    resetDemo: () => { setData(ensureCindyRegister(generateSeedData())); },
   };
 
   return (
