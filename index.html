@@ -2242,6 +2242,7 @@ function Transactions({ data, actions }) {
   const [viewingReceipt, setViewingReceipt] = useState(null);
   const [presetAccountId, setPresetAccountId] = useState(null);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [sectionOpen, setSectionOpen] = useState(true);
 
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
@@ -2275,10 +2276,13 @@ function Transactions({ data, actions }) {
   return (
     <div className="p-4 md:p-8 space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Transactions</h1>
-          <p className="text-slate-500 text-sm mt-1">{filtered.length} transactions</p>
-        </div>
+        <button type="button" className="flex items-center gap-2 text-left" onClick={() => setSectionOpen(o => !o)}>
+          <span className={"text-slate-400 transition-transform shrink-0 " + (sectionOpen ? "" : "-rotate-90")}>▾</span>
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-slate-800">Transactions</h1>
+            <p className="text-slate-500 text-sm mt-1">{filtered.length} transactions{!sectionOpen ? " · section collapsed" : ""}</p>
+          </div>
+        </button>
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => exportTransactionsCSV(filtered, accountsById)}>⬇ Export CSV</Button>
           <Button className="flex-1 sm:flex-none" onClick={openAdd}>+ Add Transaction</Button>
@@ -2287,6 +2291,8 @@ function Transactions({ data, actions }) {
 
       <SectionNotes section="transactions" data={data} actions={actions} />
 
+      {sectionOpen && (
+        <React.Fragment>
       <RulesPanel rules={data.rules} actions={actions} />
 
       <Card className="p-4 flex flex-wrap gap-3 items-center">
@@ -2442,6 +2448,8 @@ function Transactions({ data, actions }) {
           </div>
         )}
       </Card>
+        </React.Fragment>
+      )}
 
       <AccountsAndCards data={data} actions={actions} />
 
