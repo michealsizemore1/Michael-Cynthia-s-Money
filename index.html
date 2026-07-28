@@ -719,7 +719,7 @@ function useDerived(data) {
 
 /* ============================== SIDEBAR ============================== */
 
-function Sidebar({ tab, setTab, netWorth }) {
+function Sidebar({ tab, setTab, netWorth, mobileOpen, onClose }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: "📊" },
     { id: "budgets", label: "Budgets", icon: "🎯" },
@@ -729,32 +729,49 @@ function Sidebar({ tab, setTab, netWorth }) {
     { id: "goals", label: "Goals", icon: "🏆" },
     { id: "accounts", label: "Accounts", icon: "🏛️" },
   ];
+
+  const selectTab = (id) => {
+    setTab(id);
+    if (onClose) onClose();
+  };
+
   return (
-    <div className="w-64 shrink-0 bg-slate-900 text-slate-200 flex flex-col h-full">
-      <div className="px-5 py-5 flex items-center gap-2 border-b border-slate-800">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-teal-400 flex items-center justify-center font-bold text-white">M&amp;C</div>
-        <div>
-          <div className="font-bold text-white leading-tight">Michael &amp; Cynthia's</div>
-          <div className="text-[11px] text-slate-400 leading-tight">Money</div>
+    <React.Fragment>
+      {mobileOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 z-30 md:hidden" onClick={onClose} />
+      )}
+      <div
+        className={
+          "fixed md:static inset-y-0 left-0 z-40 w-64 shrink-0 bg-slate-900 text-slate-200 flex flex-col h-full transform transition-transform duration-200 ease-out md:translate-x-0 " +
+          (mobileOpen ? "translate-x-0" : "-translate-x-full")
+        }
+      >
+        <div className="px-5 py-5 flex items-center gap-2 border-b border-slate-800">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-teal-400 flex items-center justify-center font-bold text-white shrink-0">M&amp;C</div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-white leading-tight truncate">Michael &amp; Cynthia's</div>
+            <div className="text-[11px] text-slate-400 leading-tight">Money</div>
+          </div>
+          <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white text-xl leading-none px-1">&times;</button>
+        </div>
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {items.map(it => (
+            <button
+              key={it.id}
+              onClick={() => selectTab(it.id)}
+              className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors " +
+                (tab === it.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800")}
+            >
+              <span>{it.icon}</span>{it.label}
+            </button>
+          ))}
+        </nav>
+        <div className="px-5 py-5 border-t border-slate-800">
+          <div className="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Net Worth</div>
+          <div className={"text-xl font-bold " + (netWorth >= 0 ? "text-white" : "text-rose-400")}>{fmtCurrency(netWorth, { decimals: false })}</div>
         </div>
       </div>
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {items.map(it => (
-          <button
-            key={it.id}
-            onClick={() => setTab(it.id)}
-            className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors " +
-              (tab === it.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800")}
-          >
-            <span>{it.icon}</span>{it.label}
-          </button>
-        ))}
-      </nav>
-      <div className="px-5 py-5 border-t border-slate-800">
-        <div className="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Net Worth</div>
-        <div className={"text-xl font-bold " + (netWorth >= 0 ? "text-white" : "text-rose-400")}>{fmtCurrency(netWorth, { decimals: false })}</div>
-      </div>
-    </div>
+    </React.Fragment>
   );
 }
 
@@ -1848,9 +1865,15 @@ function Accounts({ data, actions, derived }) {
 
 /* ============================== APP ROOT ============================== */
 
+const TAB_LABELS = {
+  dashboard: "Dashboard", budgets: "Budgets", transactions: "Transactions",
+  subscriptions: "Subscriptions & Bills", cashflow: "Cash Flow", goals: "Goals", accounts: "Accounts",
+};
+
 function App() {
   const [data, setData] = useState(loadData);
   const [tab, setTab] = useState("dashboard");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => { saveData(data); }, [data]);
 
@@ -1889,16 +1912,22 @@ function App() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar tab={tab} setTab={setTab} netWorth={derived.netWorth} />
-      <main className="flex-1 overflow-y-auto">
-        {tab === "dashboard" && <Dashboard data={data} derived={derived} />}
-        {tab === "budgets" && <Budgets data={data} actions={actions} derived={derived} />}
-        {tab === "transactions" && <Transactions data={data} actions={actions} />}
-        {tab === "subscriptions" && <Subscriptions data={data} actions={actions} />}
-        {tab === "cashflow" && <CashFlow data={data} derived={derived} />}
-        {tab === "goals" && <Goals data={data} actions={actions} />}
-        {tab === "accounts" && <Accounts data={data} actions={actions} derived={derived} />}
-      </main>
+      <Sidebar tab={tab} setTab={setTab} netWorth={derived.netWorth} mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200 shrink-0">
+          <button onClick={() => setMobileMenuOpen(true)} className="text-slate-600 text-2xl leading-none px-1" aria-label="Open menu">☰</button>
+          <div className="font-semibold text-slate-800 truncate">{TAB_LABELS[tab] || "Menu"}</div>
+        </div>
+        <main className="flex-1 overflow-y-auto">
+          {tab === "dashboard" && <Dashboard data={data} derived={derived} />}
+          {tab === "budgets" && <Budgets data={data} actions={actions} derived={derived} />}
+          {tab === "transactions" && <Transactions data={data} actions={actions} />}
+          {tab === "subscriptions" && <Subscriptions data={data} actions={actions} />}
+          {tab === "cashflow" && <CashFlow data={data} derived={derived} />}
+          {tab === "goals" && <Goals data={data} actions={actions} />}
+          {tab === "accounts" && <Accounts data={data} actions={actions} derived={derived} />}
+        </main>
+      </div>
     </div>
   );
 }
