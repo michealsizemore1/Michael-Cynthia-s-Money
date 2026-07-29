@@ -2964,7 +2964,7 @@ function Transactions({ data, actions }) {
     category: markingSub.category === "Transfer" ? "Subscriptions" : markingSub.category,
     amount: Math.abs(markingSub.amount),
     cadence: "Monthly",
-    dayOfMonth: new Date(markingSub.date + "T00:00:00").getDate(),
+    date: markingSub.date,
     person: markingSub.person || "Joint",
     active: true,
   } : null;
@@ -3215,8 +3215,20 @@ function subscriptionScheduleLabel(s) {
   return `Bills ${cadenceText}${last ? " · last charged " + fmtDate(last) : ""} · ${s.category}`;
 }
 
+function deriveSubDate(src) {
+  if (!src) return todayISO();
+  if (src.date) return src.date;
+  if (src.priceHistory && src.priceHistory.length) return src.priceHistory[src.priceHistory.length - 1].date;
+  if (src.dayOfMonth) {
+    const base = new Date(todayISO() + "T00:00:00");
+    const day = Math.min(src.dayOfMonth, daysInMonth(base.getFullYear(), base.getMonth() + 1));
+    return isoDate(base.getFullYear(), base.getMonth() + 1, day);
+  }
+  return todayISO();
+}
+
 function SubscriptionModal({ open, onClose, onSave, onDelete, initial, prefill }) {
-  const blank = { merchant: "", category: "Subscriptions", amount: "", cadence: "Monthly", dayOfMonth: "1", person: "Joint", active: true };
+  const blank = { merchant: "", category: "Subscriptions", amount: "", cadence: "Monthly", date: todayISO(), person: "Joint", active: true };
   const [form, setForm] = useState(blank);
 
   useEffect(() => {
@@ -3225,24 +3237,27 @@ function SubscriptionModal({ open, onClose, onSave, onDelete, initial, prefill }
     setForm(src ? {
       merchant: src.merchant || "", category: src.category || "Subscriptions",
       amount: src.amount != null ? String(Math.abs(src.amount)) : "", cadence: src.cadence || "Monthly",
-      dayOfMonth: String(src.dayOfMonth || 1), person: src.person || "Joint", active: src.active !== false,
+      date: deriveSubDate(src), person: src.person || "Joint", active: src.active !== false,
     } : blank);
   }, [open, initial, prefill]);
 
   const submit = (e) => {
     e.preventDefault();
-    if (!form.merchant || form.amount === "") return;
+    if (!form.merchant || form.amount === "" || !form.date) return;
     const amount = parseFloat(form.amount) || 0;
-    const dayOfMonth = Math.min(31, Math.max(1, parseInt(form.dayOfMonth, 10) || 1));
+    const dayOfMonth = Math.min(31, Math.max(1, new Date(form.date + "T00:00:00").getDate()));
     if (initial) {
-      const priceHistory = initial.priceHistory && initial.priceHistory.length ? initial.priceHistory : [{ date: todayISO(), amount }];
-      const lastEntry = priceHistory[priceHistory.length - 1];
-      const nextHistory = lastEntry.amount !== amount ? [...priceHistory, { date: todayISO(), amount }] : priceHistory;
+      const priceHistory = initial.priceHistory && initial.priceHistory.length ? initial.priceHistory : [{ date: form.date, amount }];
+      const lastIdx = priceHistory.length - 1;
+      const lastEntry = priceHistory[lastIdx];
+      const nextHistory = lastEntry.amount !== amount
+        ? [...priceHistory, { date: form.date, amount }]
+        : priceHistory.map((h, i) => i === lastIdx ? { ...h, date: form.date } : h);
       onSave({ ...initial, merchant: form.merchant, category: form.category, amount, cadence: form.cadence, dayOfMonth, person: form.person, active: form.active, priceHistory: nextHistory });
     } else {
       onSave({
         id: uid(), merchant: form.merchant, category: form.category, amount, cadence: form.cadence,
-        dayOfMonth, person: form.person, active: form.active, priceHistory: [{ date: todayISO(), amount }],
+        dayOfMonth, person: form.person, active: form.active, priceHistory: [{ date: form.date, amount }],
       });
     }
   };
@@ -3269,8 +3284,8 @@ function SubscriptionModal({ open, onClose, onSave, onDelete, initial, prefill }
               {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </Field>
-          <Field label="Bills on day of month">
-            <input type="number" min="1" max="31" className={inputClass} value={form.dayOfMonth} onChange={e => setForm({ ...form, dayOfMonth: e.target.value })} required />
+          <Field label="Last billed on">
+            <input type="date" className={inputClass} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
           </Field>
         </div>
         <Field label="Person">
