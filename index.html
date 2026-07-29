@@ -3046,7 +3046,8 @@ function DayDetailModal({ open, onClose, day, items, monthKey, actions }) {
   if (!day) return null;
   const bills = items.filter(it => !it.income);
   const income = items.filter(it => it.income);
-  const dateLabel = day ? new Date(2026, 6, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : "";
+  const [labelYear, labelMonth] = (monthKey || "").split("-").map(Number);
+  const dateLabel = day && labelYear ? new Date(labelYear, labelMonth - 1, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : "";
   return (
     <Modal open={open} onClose={onClose} title={dateLabel}>
       <div className="space-y-4">
@@ -3093,19 +3094,47 @@ function DayDetailModal({ open, onClose, day, items, monthKey, actions }) {
   );
 }
 
+const CASHFLOW_REAL_TODAY = { year: 2026, month: 7, day: 27 };
+
 function CashFlow({ data, derived, actions }) {
-  const todayDay = 27;
+  const [viewYear, setViewYear] = useState(CASHFLOW_REAL_TODAY.year);
+  const [viewMonth, setViewMonth] = useState(CASHFLOW_REAL_TODAY.month);
   const [selectedDay, setSelectedDay] = useState(null);
+
+  const isCurrentMonth = viewYear === CASHFLOW_REAL_TODAY.year && viewMonth === CASHFLOW_REAL_TODAY.month;
+  const todayDay = isCurrentMonth ? CASHFLOW_REAL_TODAY.day : -1;
+  const viewMonthKey = `${viewYear}-${pad(viewMonth)}`;
+  const dimView = daysInMonth(viewYear, viewMonth);
+
+  // Recurring bills/subscriptions repeat every month on their day (clamped to the viewed
+  // month's length), with paid status looked up per the viewed month specifically — not
+  // tied to the real current month like derived.recurringItems is.
+  const paidForViewMonth = (data.paidBills && data.paidBills[viewMonthKey]) || {};
   const items = [
-    ...derived.recurringItems.map(b => ({ id: b.id, merchant: b.merchant, amount: b.amount, dayOfMonth: b.dayOfMonth, category: b.category, paid: b.paid, income: false })),
-    ...derived.monthTx.filter(t => t.category === "Income").map(t => ({ merchant: t.merchant, amount: t.amount, dayOfMonth: new Date(t.date + "T00:00:00").getDate(), income: true })),
+    ...(data.recurringBills || []).map(b => ({ id: b.id, merchant: b.merchant, amount: b.amount, dayOfMonth: Math.min(b.dayOfMonth, dimView), category: b.category, paid: !!paidForViewMonth[b.id], income: false })),
+    ...data.subscriptions.filter(s => s.active).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: Math.min(s.dayOfMonth, dimView), category: s.category, paid: !!paidForViewMonth[s.id], income: false })),
+    ...data.transactions.filter(t => t.category === "Income" && monthKey(t.date) === viewMonthKey).map(t => ({ merchant: t.merchant, amount: t.amount, dayOfMonth: new Date(t.date + "T00:00:00").getDate(), income: true })),
   ];
-  const upcoming = derived.recurringItems.filter(b => b.dayOfMonth > todayDay).sort((a, b) => a.dayOfMonth - b.dayOfMonth);
+
+  // "Still due this month" and Safe to Spend always reflect the real current month,
+  // regardless of which month the calendar above is browsing.
+  const upcoming = derived.recurringItems.filter(b => b.dayOfMonth > CASHFLOW_REAL_TODAY.day).sort((a, b) => a.dayOfMonth - b.dayOfMonth);
 
   // Recomputed live from `items` on every render (not a frozen snapshot), so the paid
   // checkbox in the modal stays in sync immediately after toggling.
   const selectedItems = selectedDay != null ? items.filter(it => it.dayOfMonth === selectedDay) : [];
   const openDay = (day) => setSelectedDay(day);
+
+  const monthLabel = new Date(viewYear, viewMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const goPrevMonth = () => {
+    setSelectedDay(null);
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(y => y - 1); } else setViewMonth(m => m - 1);
+  };
+  const goNextMonth = () => {
+    setSelectedDay(null);
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(y => y + 1); } else setViewMonth(m => m + 1);
+  };
+  const goToday = () => { setSelectedDay(null); setViewYear(CASHFLOW_REAL_TODAY.year); setViewMonth(CASHFLOW_REAL_TODAY.month); };
 
   return (
     <div className="p-4 md:p-8 space-y-5 md:space-y-6">
@@ -3146,9 +3175,18 @@ function CashFlow({ data, derived, actions }) {
           </div>
         </Card>
         <Card className="md:col-span-2 p-6">
-          <h3 className="font-semibold text-slate-700 mb-3">July 2026 Bill Calendar</h3>
-          <p className="text-xs text-slate-400 -mt-2 mb-3">Tap any day to see full details and check off bills as paid.</p>
-          <BillCalendar year={2026} month={7} items={items} todayDay={todayDay} onDayClick={openDay} />
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h3 className="font-semibold text-slate-700">{monthLabel} Bill Calendar</h3>
+            <div className="flex items-center gap-1.5">
+              {!isCurrentMonth && (
+                <button type="button" onClick={goToday} className="text-xs text-indigo-600 font-medium mr-1">Today</button>
+              )}
+              <button type="button" onClick={goPrevMonth} title="Previous month" className="w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center">‹</button>
+              <button type="button" onClick={goNextMonth} title="Next month" className="w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center">›</button>
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 -mt-1 mb-3">Tap any day to see full details and check off bills as paid.</p>
+          <BillCalendar year={viewYear} month={viewMonth} items={items} todayDay={todayDay} onDayClick={openDay} />
         </Card>
       </div>
 
@@ -3157,7 +3195,7 @@ function CashFlow({ data, derived, actions }) {
         onClose={() => setSelectedDay(null)}
         day={selectedDay}
         items={selectedItems}
-        monthKey={derived.curMonth}
+        monthKey={viewMonthKey}
         actions={actions}
       />
     </div>
