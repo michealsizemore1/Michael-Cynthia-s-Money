@@ -940,6 +940,200 @@ function ensureHouseholdRegisters(data) {
   return { ...data, accounts, transactions };
 }
 
+/* ---- Discovercard (Michael's card) -------------------------------------------------
+   Imported from 11 monthly statement CSVs (Jul 2025 - Jul 2026). Statement convention is
+   the opposite of this app's: a charge posts as a positive amount and a payment/credit
+   posts as negative, so signs are flipped on import (charge -> negative/expense, payment
+   or credit -> positive). Nearly every line item here is a recurring subscription. */
+
+const DISCOVER_ACCOUNT_ID = "acc_discover_cc";
+const DISCOVER_ACCOUNT_NAME = "Discovercard";
+const DISCOVER_IMPORT_NOTE = "Imported from Discover statement CSVs (Jul 2025 - Jul 2026)";
+
+const DISCOVER_REGISTER_IMPORT = [
+    { date: "2025-07-26", merchant: "Discover Payment", category: "Transfer", amount: 243.77, person: "Michael" },
+    { date: "2025-07-27", merchant: "Best Buy Total", category: "Subscriptions", amount: -179.99, person: "Michael" },
+    { date: "2025-07-30", merchant: "Discover Payment", category: "Transfer", amount: 179.99, person: "Michael" },
+    { date: "2025-08-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2025-08-02", merchant: "Acorn TV", category: "Subscriptions", amount: -8.99, person: "Michael" },
+    { date: "2025-08-10", merchant: "Hallmark Movies Now", category: "Subscriptions", amount: -7.99, person: "Michael" },
+    { date: "2025-08-15", merchant: "Netflix", category: "Subscriptions", amount: -17.99, person: "Michael" },
+    { date: "2025-08-16", merchant: "BritBox", category: "Subscriptions", amount: -8.99, person: "Michael" },
+    { date: "2025-08-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2025-08-20", merchant: "Peacock", category: "Subscriptions", amount: -13.99, person: "Michael" },
+    { date: "2025-08-23", merchant: "Discover Payment", category: "Transfer", amount: 65.0, person: "Michael" },
+    { date: "2025-08-24", merchant: "CBS", category: "Subscriptions", amount: -12.99, person: "Michael" },
+    { date: "2025-08-27", merchant: "Discover Payment", category: "Transfer", amount: 38.92, person: "Michael" },
+    { date: "2025-09-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2025-09-02", merchant: "ESPN+", category: "Subscriptions", amount: -29.99, person: "Michael" },
+    { date: "2025-09-02", merchant: "Acorn TV", category: "Subscriptions", amount: -8.99, person: "Michael" },
+    { date: "2025-09-09", merchant: "Barnes & Noble", category: "Shopping", amount: -42.39, person: "Michael" },
+    { date: "2025-09-10", merchant: "Hallmark Movies Now", category: "Subscriptions", amount: -7.99, person: "Michael" },
+    { date: "2025-09-15", merchant: "Netflix", category: "Subscriptions", amount: -17.99, person: "Michael" },
+    { date: "2025-09-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2025-09-20", merchant: "Peacock", category: "Subscriptions", amount: -16.99, person: "Michael" },
+    { date: "2025-09-21", merchant: "Frndly TV", category: "Subscriptions", amount: -10.99, person: "Michael" },
+    { date: "2025-09-24", merchant: "Paramount+", category: "Subscriptions", amount: -12.99, person: "Michael" },
+    { date: "2025-09-24", merchant: "Discover Payment", category: "Transfer", amount: 168.31, person: "Michael" },
+    { date: "2025-09-27", merchant: "Discover Payment", category: "Transfer", amount: 12.99, person: "Michael" },
+    { date: "2025-09-28", merchant: "Gear Tracker", category: "Subscriptions", amount: -1.99, person: "Michael" },
+    { date: "2025-10-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2025-10-02", merchant: "ESPN+", category: "Subscriptions", amount: -10.0, person: "Michael" },
+    { date: "2025-10-02", merchant: "ESPN+", category: "Subscriptions", amount: -29.99, person: "Michael" },
+    { date: "2025-10-02", merchant: "Experian Credit Report", category: "Subscriptions", amount: -299.99, person: "Michael" },
+    { date: "2025-10-05", merchant: "Komoot", category: "Subscriptions", amount: -4.99, person: "Michael" },
+    { date: "2025-10-15", merchant: "Netflix", category: "Subscriptions", amount: -17.99, person: "Michael" },
+    { date: "2025-10-16", merchant: "Discover Payment", category: "Transfer", amount: 369.95, person: "Michael" },
+    { date: "2025-10-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2025-10-20", merchant: "Peacock", category: "Subscriptions", amount: -16.99, person: "Michael" },
+    { date: "2025-10-22", merchant: "Frndly TV", category: "Subscriptions", amount: -10.99, person: "Michael" },
+    { date: "2025-10-24", merchant: "Paramount+", category: "Subscriptions", amount: -12.99, person: "Michael" },
+    { date: "2025-10-25", merchant: "Kindle Unlimited", category: "Subscriptions", amount: -0.99, person: "Michael" },
+    { date: "2025-10-25", merchant: "Kindle Unlimited", category: "Subscriptions", amount: -0.99, person: "Michael" },
+    { date: "2025-10-26", merchant: "Discover Payment", category: "Transfer", amount: 68.95, person: "Michael" },
+    { date: "2025-10-28", merchant: "Gear Tracker", category: "Subscriptions", amount: -1.99, person: "Michael" },
+    { date: "2025-10-29", merchant: "Discover Payment", category: "Transfer", amount: 1.98, person: "Michael" },
+    { date: "2025-11-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2025-11-02", merchant: "ESPN+", category: "Subscriptions", amount: -39.99, person: "Michael" },
+    { date: "2025-11-15", merchant: "Netflix", category: "Subscriptions", amount: -17.99, person: "Michael" },
+    { date: "2025-11-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2025-11-20", merchant: "Peacock", category: "Subscriptions", amount: -16.99, person: "Michael" },
+    { date: "2025-11-22", merchant: "Frndly TV", category: "Subscriptions", amount: -10.99, person: "Michael" },
+    { date: "2025-11-24", merchant: "Discover Cashback Bonus", category: "Income", amount: 4.14, person: "Michael" },
+    { date: "2025-11-24", merchant: "Paramount+", category: "Subscriptions", amount: -12.99, person: "Michael" },
+    { date: "2025-11-24", merchant: "Discover Payment", category: "Transfer", amount: 116.79, person: "Michael" },
+    { date: "2025-12-25", merchant: "Kindle Unlimited", category: "Subscriptions", amount: -11.99, person: "Michael" },
+    { date: "2025-12-28", merchant: "Audible", category: "Subscriptions", amount: -14.8, person: "Michael" },
+    { date: "2025-12-28", merchant: "Gear Tracker", category: "Subscriptions", amount: -1.99, person: "Michael" },
+    { date: "2025-12-30", merchant: "Discover Payment", category: "Transfer", amount: 26.97, person: "Michael" },
+    { date: "2025-12-31", merchant: "Discover Payment", category: "Transfer", amount: 14.8, person: "Michael" },
+    { date: "2026-01-01", merchant: "Audible", category: "Subscriptions", amount: -5.29, person: "Michael" },
+    { date: "2026-01-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2026-01-07", merchant: "SiriusXM", category: "Subscriptions", amount: -179.82, person: "Michael" },
+    { date: "2026-01-10", merchant: "Word Search World", category: "Subscriptions", amount: -6.99, person: "Michael" },
+    { date: "2026-01-10", merchant: "Words of Wonders", category: "Subscriptions", amount: -14.99, person: "Michael" },
+    { date: "2026-01-12", merchant: "Audible", category: "Subscriptions", amount: -5.94, person: "Michael" },
+    { date: "2026-01-13", merchant: "Discover Payment", category: "Transfer", amount: 179.82, person: "Michael" },
+    { date: "2026-01-14", merchant: "Discover Payment", category: "Transfer", amount: 32.9, person: "Michael" },
+    { date: "2026-01-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-01-17", merchant: "Audible", category: "Subscriptions", amount: -16.68, person: "Michael" },
+    { date: "2026-01-21", merchant: "Discover Payment", category: "Transfer", amount: 49.97, person: "Michael" },
+    { date: "2026-01-25", merchant: "Kindle Unlimited", category: "Subscriptions", amount: -11.99, person: "Michael" },
+    { date: "2026-01-25", merchant: "Kindle Unlimited", category: "Subscriptions", amount: -11.99, person: "Michael" },
+    { date: "2026-01-27", merchant: "Audible", category: "Subscriptions", amount: -15.85, person: "Michael" },
+    { date: "2026-01-29", merchant: "Udemy", category: "Subscriptions", amount: -15.99, person: "Michael" },
+    { date: "2026-01-31", merchant: "Discover Payment", category: "Transfer", amount: 55.82, person: "Michael" },
+    { date: "2026-02-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2026-02-10", merchant: "HBO Max", category: "Subscriptions", amount: -18.49, person: "Michael" },
+    { date: "2026-02-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-02-18", merchant: "Discover Payment", category: "Transfer", amount: 41.48, person: "Michael" },
+    { date: "2026-02-19", merchant: "Discover Payment", category: "Transfer", amount: 9.99, person: "Michael" },
+    { date: "2026-02-28", merchant: "Udemy", category: "Subscriptions", amount: -18.99, person: "Michael" },
+    { date: "2026-03-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2026-03-02", merchant: "Garmin Connect+", category: "Subscriptions", amount: -6.99, person: "Michael" },
+    { date: "2026-03-05", merchant: "Discover Payment", category: "Transfer", amount: 18.99, person: "Michael" },
+    { date: "2026-03-07", merchant: "Audible", category: "Subscriptions", amount: -13.36, person: "Michael" },
+    { date: "2026-03-12", merchant: "Discover Cashback Bonus", category: "Income", amount: 1.67, person: "Michael" },
+    { date: "2026-03-12", merchant: "Discover Payment", category: "Transfer", amount: 41.67, person: "Michael" },
+    { date: "2026-03-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-03-20", merchant: "Netflix", category: "Subscriptions", amount: -17.99, person: "Michael" },
+    { date: "2026-03-25", merchant: "Discover Payment", category: "Transfer", amount: 27.98, person: "Michael" },
+    { date: "2026-03-31", merchant: "iFIT", category: "Health & Fitness", amount: 0.9, person: "Michael" },
+    { date: "2026-03-31", merchant: "iFIT", category: "Health & Fitness", amount: 0.9, person: "Michael" },
+    { date: "2026-04-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2026-04-02", merchant: "Amazon Prime", category: "Subscriptions", amount: -147.34, person: "Michael" },
+    { date: "2026-04-02", merchant: "Garmin Connect+", category: "Subscriptions", amount: -6.99, person: "Michael" },
+    { date: "2026-04-08", merchant: "NoteWise AI", category: "Subscriptions", amount: -4.99, person: "Michael" },
+    { date: "2026-04-10", merchant: "Discover Payment", category: "Transfer", amount: 147.34, person: "Michael" },
+    { date: "2026-04-15", merchant: "Discover Payment", category: "Transfer", amount: 33.17, person: "Michael" },
+    { date: "2026-04-15", merchant: "Microsoft 365", category: "Subscriptions", amount: -129.99, person: "Michael" },
+    { date: "2026-04-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-04-17", merchant: "Acorn TV", category: "Subscriptions", amount: -8.99, person: "Michael" },
+    { date: "2026-04-20", merchant: "Discover Payment", category: "Transfer", amount: 129.99, person: "Michael" },
+    { date: "2026-04-22", merchant: "Discover Payment", category: "Transfer", amount: 18.98, person: "Michael" },
+    { date: "2026-05-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
+    { date: "2026-05-02", merchant: "Garmin Connect+", category: "Subscriptions", amount: -6.99, person: "Michael" },
+    { date: "2026-05-08", merchant: "NoteWise AI", category: "Subscriptions", amount: -4.99, person: "Michael" },
+    { date: "2026-05-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-05-17", merchant: "Planet Fitness", category: "Health & Fitness", amount: -1.06, person: "Michael" },
+    { date: "2026-05-22", merchant: "Discover Payment", category: "Transfer", amount: 34.97, person: "Michael" },
+    { date: "2026-05-28", merchant: "Discover Payment", category: "Transfer", amount: 11.05, person: "Michael" },
+    { date: "2026-05-28", merchant: "FloSports", category: "Subscriptions", amount: 9.0, person: "Michael" },
+    { date: "2026-06-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -26.99, person: "Michael" },
+    { date: "2026-06-02", merchant: "Garmin Connect+", category: "Subscriptions", amount: -6.99, person: "Michael" },
+    { date: "2026-06-06", merchant: "Perplexity AI", category: "Subscriptions", amount: -10.0, person: "Michael" },
+    { date: "2026-06-06", merchant: "Perplexity AI", category: "Subscriptions", amount: -20.0, person: "Michael" },
+    { date: "2026-06-07", merchant: "Perplexity AI", category: "Subscriptions", amount: -10.0, person: "Michael" },
+    { date: "2026-06-08", merchant: "Anthropic Claude Subscription", category: "Subscriptions", amount: -20.0, person: "Michael" },
+    { date: "2026-06-08", merchant: "NoteWise AI", category: "Subscriptions", amount: -4.99, person: "Michael" },
+    { date: "2026-06-10", merchant: "Anthropic API", category: "Subscriptions", amount: -5.0, person: "Michael" },
+    { date: "2026-06-11", merchant: "Audible", category: "Subscriptions", amount: -19.08, person: "Michael" },
+    { date: "2026-06-12", merchant: "Netlify", category: "Subscriptions", amount: -9.0, person: "Michael" },
+    { date: "2026-06-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-06-23", merchant: "Discover Payment", category: "Transfer", amount: 70.2, person: "Michael" },
+    { date: "2026-06-25", merchant: "Anthropic Claude Subscription", category: "Subscriptions", amount: -191.16, person: "Michael" },
+    { date: "2026-06-30", merchant: "Discover Payment", category: "Transfer", amount: 254.0, person: "Michael" },
+    { date: "2026-07-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -26.99, person: "Michael" },
+    { date: "2026-07-07", merchant: "SiriusXM", category: "Subscriptions", amount: -191.93, person: "Michael" },
+    { date: "2026-07-12", merchant: "Anthropic API", category: "Subscriptions", amount: -10.0, person: "Michael" },
+    { date: "2026-07-16", merchant: "Discover Payment", category: "Transfer", amount: 58.22, person: "Michael" },
+    { date: "2026-07-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
+    { date: "2026-07-17", merchant: "Planet Fitness", category: "Health & Fitness", amount: -21.23, person: "Michael" },
+];
+
+/* Recurring charges found by scanning the Discover statement history above with the same
+   detectUnknownSubscriptions heuristic used elsewhere (>=2 occurrences, >=2 distinct
+   months, consistent amount, ~monthly cadence). "active" reflects whether the merchant
+   still appears in the most recent statement (Jun 25 - Jul 24, 2026) or shortly before —
+   the user can flip this in the Subscriptions & Bills tab if a call was made either way. */
+const DISCOVER_SUBSCRIPTIONS_FOUND = [
+  { id: "cand_ring_protect_plan", merchant: "Ring Protect Plan", category: "Subscriptions", amount: 9.99, dayOfMonth: 16, active: true, lastDate: "2026-07-16", person: "Michael" },
+  { id: "cand_garmin_connect", merchant: "Garmin Connect+", category: "Subscriptions", amount: 6.99, dayOfMonth: 2, active: false, lastDate: "2026-06-02", person: "Michael" },
+  { id: "cand_notewise_ai", merchant: "NoteWise AI", category: "Subscriptions", amount: 4.99, dayOfMonth: 8, active: false, lastDate: "2026-06-08", person: "Michael" },
+  { id: "cand_paramount", merchant: "Paramount+", category: "Subscriptions", amount: 12.99, dayOfMonth: 24, active: false, lastDate: "2025-11-24", person: "Michael" },
+  { id: "cand_frndly_tv", merchant: "Frndly TV", category: "Subscriptions", amount: 10.99, dayOfMonth: 22, active: false, lastDate: "2025-11-22", person: "Michael" },
+  { id: "cand_udemy", merchant: "Udemy", category: "Subscriptions", amount: 17.49, dayOfMonth: 28, active: false, lastDate: "2026-02-28", person: "Michael" },
+  { id: "cand_hallmark_movies_now", merchant: "Hallmark Movies Now", category: "Subscriptions", amount: 7.99, dayOfMonth: 10, active: false, lastDate: "2025-09-10", person: "Michael" },
+];
+
+function buildDiscoverRegisterAdditions() {
+  const balance = Math.round(DISCOVER_REGISTER_IMPORT.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+  const account = { id: DISCOVER_ACCOUNT_ID, name: DISCOVER_ACCOUNT_NAME, institution: "Discover", type: "credit", balance, openingBalance: 0 };
+  const transactions = DISCOVER_REGISTER_IMPORT.map(t => ({
+    id: uid(), date: t.date, accountId: DISCOVER_ACCOUNT_ID, merchant: t.merchant,
+    category: t.category, amount: t.amount, notes: DISCOVER_IMPORT_NOTE, person: t.person, cleared: true,
+  }));
+  const subscriptions = DISCOVER_SUBSCRIPTIONS_FOUND.map(s => ({
+    id: s.id, merchant: s.merchant, category: s.category, cadence: "Monthly", amount: s.amount,
+    dayOfMonth: s.dayOfMonth, active: s.active, priceHistory: [{ date: s.lastDate, amount: s.amount }], person: s.person,
+  }));
+  return { account, transactions, subscriptions };
+}
+
+function ensureDiscoverRegister(data) {
+  let accounts = data.accounts || [];
+  let transactions = data.transactions || [];
+  let subscriptions = data.subscriptions || [];
+
+  const hasAccount = accounts.some(a => a.id === DISCOVER_ACCOUNT_ID || a.name === DISCOVER_ACCOUNT_NAME);
+  const hasImport = transactions.some(t => t.notes === DISCOVER_IMPORT_NOTE);
+  const hasSubs = DISCOVER_SUBSCRIPTIONS_FOUND.every(s => subscriptions.some(x => x.id === s.id));
+  if (hasAccount && hasImport && hasSubs) return data; // already fully up to date
+
+  const { account, transactions: importedTx, subscriptions: foundSubs } = buildDiscoverRegisterAdditions();
+  accounts = hasAccount
+    ? accounts.map(a => (a.id === DISCOVER_ACCOUNT_ID || a.name === DISCOVER_ACCOUNT_NAME) ? { ...a, balance: account.balance, institution: account.institution } : a)
+    : [...accounts, account];
+  if (!hasSubs) {
+    foundSubs.forEach(s => { if (!subscriptions.some(x => x.id === s.id)) subscriptions = [...subscriptions, s]; });
+  }
+  if (!hasImport) {
+    transactions = [...importedTx, ...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
+  }
+
+  return { ...data, accounts, transactions, subscriptions };
+}
+
 function loadData() {
   let data = null;
   try {
@@ -949,6 +1143,7 @@ function loadData() {
   if (!data) data = generateSeedData();
   data = ensureCindyRegister(data);
   data = ensureHouseholdRegisters(data);
+  data = ensureDiscoverRegister(data);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   return data;
 }
@@ -2388,6 +2583,7 @@ function AccountsAndCards({ data, actions }) {
   const mikeAccount = data.accounts.find(a => a.id === MIKE_ACCOUNT_ID);
   const savingsAccount = data.accounts.find(a => a.id === SAVINGS_ACCOUNT_ID);
   const hysaAccount = data.accounts.find(a => a.id === HYSA_ACCOUNT_ID);
+  const discoverAccount = data.accounts.find(a => a.id === DISCOVER_ACCOUNT_ID || a.name === DISCOVER_ACCOUNT_NAME);
 
   const tabs = [
     { key: "cc", label: "💳 Credit Card", account: ccAccount, kind: "credit" },
@@ -2395,6 +2591,7 @@ function AccountsAndCards({ data, actions }) {
     { key: "mike", label: "🏦 Mike's Checking", account: mikeAccount, kind: "bank" },
     { key: "savings", label: "🐷 Savings", account: savingsAccount, kind: "bank" },
     { key: "hysa", label: "💰 HYSA", account: hysaAccount, kind: "bank" },
+    { key: "discover", label: "💳 Discovercard", account: discoverAccount, kind: "bank" },
   ].filter(t => t.account);
 
   if (tabs.length === 0) return null;
@@ -2404,7 +2601,7 @@ function AccountsAndCards({ data, actions }) {
     <div className="space-y-3">
       <div>
         <h2 className="text-lg md:text-xl font-bold text-slate-800">🗂️ Accounts &amp; Cards</h2>
-        <p className="text-sm text-slate-500 mt-0.5">Your household transaction registers — credit card, both checking accounts, savings, and the HYSA.</p>
+        <p className="text-sm text-slate-500 mt-0.5">Your household transaction registers — credit cards, both checking accounts, savings, and the HYSA.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {tabs.map(t => (
@@ -4038,8 +4235,8 @@ function App() {
       }),
     })),
 
-    resetDemo: () => { setData(ensureHouseholdRegisters(ensureCindyRegister(emptyData()))); },
-    restoreData: (newData) => { setData(ensureHouseholdRegisters(ensureCindyRegister(newData))); },
+    resetDemo: () => { setData(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(emptyData())))); },
+    restoreData: (newData) => { setData(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(newData)))); },
     // Unlike resetDemo, this does NOT re-apply the real-register migrations — it's a genuinely blank slate,
     // wiping the user's real imported data along with the demo content.
     clearAllData: () => { setData(emptyData()); },
