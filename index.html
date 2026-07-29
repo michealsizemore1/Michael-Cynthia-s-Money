@@ -109,6 +109,9 @@ const DEFAULT_BUDGETS = {
 /* ============================== UTILITIES ============================== */
 
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+// The app treats "today" as a fixed date (2026-07-27) throughout — same convention used by
+// useDerived() and the Cash Flow calendar — so newly-logged price history lines up with it.
+function todayISO() { return "2026-07-27"; }
 
 function fmtCurrency(n, opts) {
   const o = opts || {};
@@ -967,7 +970,7 @@ const DISCOVER_REGISTER_IMPORT = [
     { date: "2025-09-01", merchant: "YouTube Premium", category: "Subscriptions", amount: -22.99, person: "Michael" },
     { date: "2025-09-02", merchant: "ESPN+", category: "Subscriptions", amount: -29.99, person: "Michael" },
     { date: "2025-09-02", merchant: "Acorn TV", category: "Subscriptions", amount: -8.99, person: "Michael" },
-    { date: "2025-09-09", merchant: "Barnes & Noble", category: "Shopping", amount: -42.39, person: "Michael" },
+    { date: "2025-09-09", merchant: "Barnes & Noble Membership", category: "Subscriptions", amount: -42.39, person: "Michael" },
     { date: "2025-09-10", merchant: "Hallmark Movies Now", category: "Subscriptions", amount: -7.99, person: "Michael" },
     { date: "2025-09-15", merchant: "Netflix", category: "Subscriptions", amount: -17.99, person: "Michael" },
     { date: "2025-09-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
@@ -1055,7 +1058,7 @@ const DISCOVER_REGISTER_IMPORT = [
     { date: "2026-05-02", merchant: "Garmin Connect+", category: "Subscriptions", amount: -6.99, person: "Michael" },
     { date: "2026-05-08", merchant: "NoteWise AI", category: "Subscriptions", amount: -4.99, person: "Michael" },
     { date: "2026-05-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
-    { date: "2026-05-17", merchant: "Planet Fitness", category: "Health & Fitness", amount: -1.06, person: "Michael" },
+    { date: "2026-05-17", merchant: "Planet Fitness", category: "Subscriptions", amount: -1.06, person: "Michael" },
     { date: "2026-05-22", merchant: "Discover Payment", category: "Transfer", amount: 34.97, person: "Michael" },
     { date: "2026-05-28", merchant: "Discover Payment", category: "Transfer", amount: 11.05, person: "Michael" },
     { date: "2026-05-28", merchant: "FloSports", category: "Subscriptions", amount: 9.0, person: "Michael" },
@@ -1078,7 +1081,7 @@ const DISCOVER_REGISTER_IMPORT = [
     { date: "2026-07-12", merchant: "Anthropic API", category: "Subscriptions", amount: -10.0, person: "Michael" },
     { date: "2026-07-16", merchant: "Discover Payment", category: "Transfer", amount: 58.22, person: "Michael" },
     { date: "2026-07-16", merchant: "Ring Protect Plan", category: "Subscriptions", amount: -9.99, person: "Michael" },
-    { date: "2026-07-17", merchant: "Planet Fitness", category: "Health & Fitness", amount: -21.23, person: "Michael" },
+    { date: "2026-07-17", merchant: "Planet Fitness", category: "Subscriptions", amount: -21.23, person: "Michael" },
 ];
 
 /* Recurring charges found by scanning the Discover statement history above with the same
@@ -1095,6 +1098,32 @@ const DISCOVER_SUBSCRIPTIONS_FOUND = [
   { id: "cand_udemy", merchant: "Udemy", category: "Subscriptions", amount: 17.49, dayOfMonth: 28, active: false, lastDate: "2026-02-28", person: "Michael" },
   { id: "cand_hallmark_movies_now", merchant: "Hallmark Movies Now", category: "Subscriptions", amount: 7.99, dayOfMonth: 10, active: false, lastDate: "2025-09-10", person: "Michael" },
 ];
+
+/* Subscriptions the user explicitly identified by name (2026-07-28), with real cadence/amounts
+   pulled from the Discover statement history above where available. Costco and Boldin have no
+   matching charges anywhere in the imported statements, so they're added as $0 placeholders —
+   the user can fill in the real amount via the "Edit" action once they have it. */
+const USER_NAMED_SUBSCRIPTIONS = [
+  { id: "sub_youtube_premium", merchant: "YouTube Premium", category: "Subscriptions", cadence: "Monthly", amount: 26.99, dayOfMonth: 1, active: true, person: "Michael", priceHistory: [{ date: "2025-08-01", amount: 22.99 }, { date: "2026-06-01", amount: 26.99 }] },
+  { id: "sub_planet_fitness_real", merchant: "Planet Fitness", category: "Subscriptions", cadence: "Monthly", amount: 21.23, dayOfMonth: 17, active: true, person: "Michael", priceHistory: [{ date: "2026-07-17", amount: 21.23 }] },
+  { id: "sub_siriusxm", merchant: "SiriusXM", category: "Subscriptions", cadence: "Semi-Annual", amount: 191.93, dayOfMonth: 7, active: true, person: "Michael", priceHistory: [{ date: "2026-01-07", amount: 179.82 }, { date: "2026-07-07", amount: 191.93 }] },
+  { id: "sub_amazon_prime_real", merchant: "Amazon Prime", category: "Subscriptions", cadence: "Annual", amount: 147.34, dayOfMonth: 2, active: true, person: "Michael", priceHistory: [{ date: "2026-04-02", amount: 147.34 }] },
+  { id: "sub_microsoft_365", merchant: "Microsoft 365", category: "Subscriptions", cadence: "Annual", amount: 129.99, dayOfMonth: 15, active: true, person: "Michael", priceHistory: [{ date: "2026-04-15", amount: 129.99 }] },
+  { id: "sub_claude_pro", merchant: "Claude Pro (Anthropic)", category: "Subscriptions", cadence: "Annual", amount: 191.16, dayOfMonth: 25, active: true, person: "Michael", priceHistory: [{ date: "2026-06-25", amount: 191.16 }] },
+  { id: "sub_barnes_noble", merchant: "Barnes & Noble Membership", category: "Subscriptions", cadence: "Annual", amount: 42.39, dayOfMonth: 9, active: true, person: "Michael", priceHistory: [{ date: "2025-09-09", amount: 42.39 }] },
+  { id: "sub_costco", merchant: "Costco", category: "Subscriptions", cadence: "Annual", amount: 0, dayOfMonth: 1, active: true, person: "Joint", priceHistory: [{ date: "2026-07-28", amount: 0 }] },
+  { id: "sub_boldin", merchant: "Boldin", category: "Subscriptions", cadence: "Annual", amount: 0, dayOfMonth: 1, active: true, person: "Joint", priceHistory: [{ date: "2026-07-28", amount: 0 }] },
+];
+
+function ensureUserNamedSubscriptions(data) {
+  let subscriptions = data.subscriptions || [];
+  const hasAll = USER_NAMED_SUBSCRIPTIONS.every(s => subscriptions.some(x => x.id === s.id));
+  if (hasAll) return data;
+  USER_NAMED_SUBSCRIPTIONS.forEach(s => {
+    if (!subscriptions.some(x => x.id === s.id)) subscriptions = [...subscriptions, s];
+  });
+  return { ...data, subscriptions };
+}
 
 function buildDiscoverRegisterAdditions() {
   const balance = Math.round(DISCOVER_REGISTER_IMPORT.reduce((s, t) => s + t.amount, 0) * 100) / 100;
@@ -1144,6 +1173,7 @@ function loadData() {
   data = ensureCindyRegister(data);
   data = ensureHouseholdRegisters(data);
   data = ensureDiscoverRegister(data);
+  data = ensureUserNamedSubscriptions(data);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   return data;
 }
@@ -1397,7 +1427,10 @@ function useDerived(data) {
     const paidForMonth = (data.paidBills && data.paidBills[curMonth]) || {};
     const recurringItems = [
       ...(data.recurringBills || []).map(b => ({ ...b, paid: !!paidForMonth[b.id] })),
-      ...data.subscriptions.filter(s => s.active).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category, paid: !!paidForMonth[s.id] })),
+      // Only Monthly-cadence subscriptions belong on the monthly bill calendar / Safe-to-Spend —
+      // Annual/Semi-Annual ones are real costs but aren't due every month, so including them here
+      // would wildly overstate what's still owed this month.
+      ...data.subscriptions.filter(s => s.active && (!s.cadence || s.cadence === "Monthly")).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category, paid: !!paidForMonth[s.id] })),
     ];
     const upcomingBillsRemaining = recurringItems.filter(b => b.dayOfMonth > todayDay && !b.paid).reduce((s, b) => s + b.amount, 0);
     const checkingAccount = data.accounts.find(a => a.type === "checking");
@@ -2874,6 +2907,7 @@ function Transactions({ data, actions }) {
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [sectionOpen, setSectionOpen] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
+  const [markingSub, setMarkingSub] = useState(null);
 
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
@@ -2897,6 +2931,19 @@ function Transactions({ data, actions }) {
 
   const openAdd = (accountId) => { setEditing(null); setPresetAccountId(accountId || null); setModalOpen(true); };
   const openEdit = (t) => { setEditing(t); setPresetAccountId(null); setModalOpen(true); };
+
+  const openMarkSubscription = (t) => setMarkingSub(t);
+  const closeMarkSubscription = () => setMarkingSub(null);
+  const markSubPrefill = markingSub ? {
+    merchant: markingSub.merchant,
+    category: markingSub.category === "Transfer" ? "Subscriptions" : markingSub.category,
+    amount: Math.abs(markingSub.amount),
+    cadence: "Monthly",
+    dayOfMonth: new Date(markingSub.date + "T00:00:00").getDate(),
+    person: markingSub.person || "Joint",
+    active: true,
+  } : null;
+  const saveMarkedSubscription = (s) => { actions.addSubscription(s); setMarkingSub(null); };
 
   const save = (form) => {
     if (editing) actions.updateTransaction({ ...form, id: editing.id });
@@ -3018,6 +3065,7 @@ function Transactions({ data, actions }) {
                     </div>
                     <div className="flex gap-4 mt-3 pt-3 border-t border-slate-50">
                       <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(t)}>Edit</button>
+                      {t.amount < 0 && <button className="text-xs text-indigo-600 font-medium" onClick={() => openMarkSubscription(t)}>Mark as Subscription</button>}
                       <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
                     </div>
                   </div>
@@ -3065,6 +3113,7 @@ function Transactions({ data, actions }) {
                   </td>
                   <td className="px-5 py-3 text-right opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openEdit(t)}>Edit</button>
+                    {t.amount < 0 && <button className="text-xs text-indigo-600 font-medium mr-3" onClick={() => openMarkSubscription(t)}>Mark as Subscription</button>}
                     <button className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteTransaction(t.id)}>Delete</button>
                   </td>
                 </tr>
@@ -3089,6 +3138,8 @@ function Transactions({ data, actions }) {
 
       <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={save} initial={editing} accounts={data.accounts} rules={data.rules} defaultAccountId={presetAccountId} />
 
+      <SubscriptionModal open={!!markingSub} onClose={closeMarkSubscription} onSave={saveMarkedSubscription} prefill={markSubPrefill} />
+
       <Modal open={!!viewingReceipt} onClose={() => setViewingReceipt(null)} title="Receipt">
         {viewingReceipt && <img src={viewingReceipt} className="w-full rounded-lg" alt="Receipt" />}
       </Modal>
@@ -3098,20 +3149,140 @@ function Transactions({ data, actions }) {
 
 /* ============================== SUBSCRIPTIONS ============================== */
 
+const CADENCE_OPTIONS = ["Monthly", "Quarterly", "Semi-Annual", "Annual"];
+const CADENCE_PER_YEAR = { Monthly: 12, Quarterly: 4, "Semi-Annual": 2, Annual: 1 };
+const CADENCE_SUFFIX = { Monthly: "/mo", Quarterly: "/qtr", "Semi-Annual": "/6mo", Annual: "/yr" };
+
+function subCadence(s) { return s.cadence || "Monthly"; }
+function subYearlyAmount(s) { return s.amount * (CADENCE_PER_YEAR[subCadence(s)] || 12); }
+function subMonthlyEquivalent(s) { return subYearlyAmount(s) / 12; }
+
+function subscriptionScheduleLabel(s) {
+  const cadence = subCadence(s);
+  if (cadence === "Monthly") {
+    return `Bills on the ${s.dayOfMonth}${s.dayOfMonth === 1 ? "st" : "th"} · ${s.category}`;
+  }
+  const last = s.priceHistory && s.priceHistory.length ? s.priceHistory[s.priceHistory.length - 1].date : null;
+  const cadenceText = cadence === "Quarterly" ? "quarterly" : cadence === "Semi-Annual" ? "twice a year" : "yearly";
+  return `Bills ${cadenceText}${last ? " · last charged " + fmtDate(last) : ""} · ${s.category}`;
+}
+
+function SubscriptionModal({ open, onClose, onSave, onDelete, initial, prefill }) {
+  const blank = { merchant: "", category: "Subscriptions", amount: "", cadence: "Monthly", dayOfMonth: "1", person: "Joint", active: true };
+  const [form, setForm] = useState(blank);
+
+  useEffect(() => {
+    if (!open) return;
+    const src = initial || prefill;
+    setForm(src ? {
+      merchant: src.merchant || "", category: src.category || "Subscriptions",
+      amount: src.amount != null ? String(Math.abs(src.amount)) : "", cadence: src.cadence || "Monthly",
+      dayOfMonth: String(src.dayOfMonth || 1), person: src.person || "Joint", active: src.active !== false,
+    } : blank);
+  }, [open, initial, prefill]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.merchant || form.amount === "") return;
+    const amount = parseFloat(form.amount) || 0;
+    const dayOfMonth = Math.min(31, Math.max(1, parseInt(form.dayOfMonth, 10) || 1));
+    if (initial) {
+      const priceHistory = initial.priceHistory && initial.priceHistory.length ? initial.priceHistory : [{ date: todayISO(), amount }];
+      const lastEntry = priceHistory[priceHistory.length - 1];
+      const nextHistory = lastEntry.amount !== amount ? [...priceHistory, { date: todayISO(), amount }] : priceHistory;
+      onSave({ ...initial, merchant: form.merchant, category: form.category, amount, cadence: form.cadence, dayOfMonth, person: form.person, active: form.active, priceHistory: nextHistory });
+    } else {
+      onSave({
+        id: uid(), merchant: form.merchant, category: form.category, amount, cadence: form.cadence,
+        dayOfMonth, person: form.person, active: form.active, priceHistory: [{ date: todayISO(), amount }],
+      });
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial ? "Edit Subscription" : prefill ? "Mark as Subscription" : "Add Subscription"}>
+      <form onSubmit={submit}>
+        <Field label="Merchant">
+          <input className={inputClass} value={form.merchant} onChange={e => setForm({ ...form, merchant: e.target.value })} required />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Amount ($ per charge)">
+            <input type="number" step="0.01" className={inputClass} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
+          </Field>
+          <Field label="Cadence">
+            <select className={inputClass} value={form.cadence} onChange={e => setForm({ ...form, cadence: e.target.value })}>
+              {CADENCE_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Category">
+            <select className={inputClass} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+              {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Bills on day of month">
+            <input type="number" min="1" max="31" className={inputClass} value={form.dayOfMonth} onChange={e => setForm({ ...form, dayOfMonth: e.target.value })} required />
+          </Field>
+        </div>
+        <Field label="Person">
+          <select className={inputClass} value={form.person} onChange={e => setForm({ ...form, person: e.target.value })}>
+            {PEOPLE.map(p => <option key={p} value={p}>{PEOPLE_META[p].icon} {p}</option>)}
+          </select>
+        </Field>
+        <Field label="Status">
+          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
+            Active
+          </label>
+        </Field>
+        <div className="flex justify-between gap-2 mt-4">
+          {initial && onDelete ? (
+            <Button variant="danger" type="button" onClick={() => onDelete(initial.id)}>Delete</Button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
+            <Button type="submit">{initial ? "Save Changes" : "Add Subscription"}</Button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function Subscriptions({ data, actions }) {
   const active = data.subscriptions.filter(s => s.active);
   const cancelled = data.subscriptions.filter(s => !s.active);
-  const monthlyTotal = active.reduce((s, x) => s + x.amount, 0);
-  const yearlyTotal = monthlyTotal * 12;
+  const monthlyTotal = active.reduce((s, x) => s + subMonthlyEquivalent(x), 0);
+  const yearlyTotal = active.reduce((s, x) => s + subYearlyAmount(x), 0);
 
   const priceIncreases = active.filter(s => s.priceHistory.length > 1);
-  const cancelledMonthlySavings = cancelled.reduce((s, x) => s + x.amount, 0);
+  const cancelledYearlySavings = cancelled.reduce((s, x) => s + subYearlyAmount(x), 0);
+  const cancelledMonthlySavings = cancelledYearlySavings / 12;
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const openAdd = () => { setEditing(null); setModalOpen(true); };
+  const openEdit = (s) => { setEditing(s); setModalOpen(true); };
+  const closeModal = () => setModalOpen(false);
+  const saveSub = (s) => {
+    if (editing) actions.updateSubscription(s);
+    else actions.addSubscription(s);
+    setModalOpen(false);
+  };
+  const deleteSub = (id) => {
+    actions.deleteSubscription(id);
+    setModalOpen(false);
+  };
 
   return (
     <div className="p-4 md:p-8 space-y-5 md:space-y-6">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-slate-800">Subscriptions &amp; Bills</h1>
-        <p className="text-slate-500 text-sm mt-1">Recurring charges detected across your accounts.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Subscriptions &amp; Bills</h1>
+          <p className="text-slate-500 text-sm mt-1">Recurring charges detected across your accounts.</p>
+        </div>
+        <Button className="shrink-0" onClick={openAdd}>+ Add Subscription</Button>
       </div>
 
       <SectionNotes section="subscriptions" data={data} actions={actions} />
@@ -3124,6 +3295,7 @@ function Subscriptions({ data, actions }) {
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Monthly Cost</div>
           <div className="text-2xl font-bold text-slate-800 mt-1">{fmtCurrency(monthlyTotal)}</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">Averaged across cadences</div>
         </Card>
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Projected Yearly Cost</div>
@@ -3132,7 +3304,7 @@ function Subscriptions({ data, actions }) {
         <Card className="p-5">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wide">Saved by Cancelling</div>
           <div className="text-2xl font-bold text-emerald-600 mt-1">{fmtCurrency(cancelledMonthlySavings)}/mo</div>
-          <div className="text-xs text-slate-400 font-medium mt-1">{fmtCurrency(cancelledMonthlySavings * 12, { decimals: false })}/yr</div>
+          <div className="text-xs text-slate-400 font-medium mt-1">{fmtCurrency(cancelledYearlySavings, { decimals: false })}/yr</div>
         </Card>
       </div>
 
@@ -3144,7 +3316,7 @@ function Subscriptions({ data, actions }) {
             const cur = s.priceHistory[s.priceHistory.length - 1];
             return (
               <div key={s.id} className="text-sm text-amber-700">
-                {s.merchant} increased from {fmtCurrency(prev.amount)} to {fmtCurrency(cur.amount)}/mo on {fmtDate(cur.date)}.
+                {s.merchant} increased from {fmtCurrency(prev.amount)} to {fmtCurrency(cur.amount)}{CADENCE_SUFFIX[subCadence(s)]} on {fmtDate(cur.date)}.
               </div>
             );
           })}
@@ -3160,15 +3332,17 @@ function Subscriptions({ data, actions }) {
                 <MerchantAvatar merchant={s.merchant} category={s.category} size={40} />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-700 truncate">{s.merchant}</div>
-                  <div className="text-xs text-slate-400 truncate">Bills on the {s.dayOfMonth}{s.dayOfMonth === 1 ? "st" : "th"} · {s.category}</div>
+                  <div className="text-xs text-slate-400 truncate">{subscriptionScheduleLabel(s)}</div>
                 </div>
               </div>
               <div className="flex items-center gap-4 shrink-0">
-                <div className="text-sm font-semibold text-slate-700">{fmtCurrency(s.amount)}/mo</div>
+                <div className="text-sm font-semibold text-slate-700">{fmtCurrency(s.amount)}{CADENCE_SUFFIX[subCadence(s)]}</div>
+                <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(s)}>Edit</button>
                 <button className="text-xs text-rose-500 font-medium" onClick={() => actions.toggleSubscription(s.id)}>Cancel</button>
               </div>
             </div>
           ))}
+          {active.length === 0 && <p className="text-sm text-slate-400">No active subscriptions yet.</p>}
         </div>
       </Card>
 
@@ -3182,12 +3356,17 @@ function Subscriptions({ data, actions }) {
                   <MerchantAvatar merchant={s.merchant} category={s.category} size={40} />
                   <div className="text-sm font-medium text-slate-700 line-through truncate">{s.merchant}</div>
                 </div>
-                <button className="text-xs text-indigo-600 font-medium shrink-0" onClick={() => actions.toggleSubscription(s.id)}>Reactivate</button>
+                <div className="flex items-center gap-4 shrink-0">
+                  <button className="text-xs text-indigo-600 font-medium" onClick={() => openEdit(s)}>Edit</button>
+                  <button className="text-xs text-indigo-600 font-medium" onClick={() => actions.toggleSubscription(s.id)}>Reactivate</button>
+                </div>
               </div>
             ))}
           </div>
         </Card>
       )}
+
+      <SubscriptionModal open={modalOpen} onClose={closeModal} onSave={saveSub} onDelete={deleteSub} initial={editing} />
     </div>
   );
 }
@@ -3951,7 +4130,7 @@ function AIAssistant({ data, actions, derived }) {
 
   const addCandidate = (c) => {
     actions.addSubscription({
-      id: uid(), merchant: c.merchant, category: c.category, amount: c.amount,
+      id: uid(), merchant: c.merchant, category: c.category, amount: c.amount, cadence: "Monthly",
       dayOfMonth: c.dayOfMonth, active: true, priceHistory: [{ date: c.lastDate, amount: c.amount }], person: c.person,
     });
   };
@@ -4214,6 +4393,8 @@ function App() {
 
     toggleSubscription: (id) => setData(d => ({ ...d, subscriptions: d.subscriptions.map(s => s.id === id ? { ...s, active: !s.active } : s) })),
     addSubscription: (s) => setData(d => ({ ...d, subscriptions: [...d.subscriptions, s] })),
+    updateSubscription: (s) => setData(d => ({ ...d, subscriptions: d.subscriptions.map(x => x.id === s.id ? s : x) })),
+    deleteSubscription: (id) => setData(d => ({ ...d, subscriptions: d.subscriptions.filter(x => x.id !== id) })),
     dismissSubscriptionCandidate: (id) => setData(d => ({ ...d, dismissedSubscriptionCandidates: [...(d.dismissedSubscriptionCandidates || []), id] })),
 
     addGoal: (g) => setData(d => ({ ...d, goals: [...d.goals, g] })),
@@ -4235,8 +4416,8 @@ function App() {
       }),
     })),
 
-    resetDemo: () => { setData(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(emptyData())))); },
-    restoreData: (newData) => { setData(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(newData)))); },
+    resetDemo: () => { setData(ensureUserNamedSubscriptions(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(emptyData()))))); },
+    restoreData: (newData) => { setData(ensureUserNamedSubscriptions(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(newData))))); },
     // Unlike resetDemo, this does NOT re-apply the real-register migrations — it's a genuinely blank slate,
     // wiping the user's real imported data along with the demo content.
     clearAllData: () => { setData(emptyData()); },
