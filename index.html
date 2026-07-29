@@ -1427,10 +1427,10 @@ function useDerived(data) {
     const paidForMonth = (data.paidBills && data.paidBills[curMonth]) || {};
     const recurringItems = [
       ...(data.recurringBills || []).map(b => ({ ...b, paid: !!paidForMonth[b.id] })),
-      // Only Monthly-cadence subscriptions belong on the monthly bill calendar / Safe-to-Spend —
-      // Annual/Semi-Annual ones are real costs but aren't due every month, so including them here
-      // would wildly overstate what's still owed this month.
-      ...data.subscriptions.filter(s => s.active && (!s.cadence || s.cadence === "Monthly")).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category, paid: !!paidForMonth[s.id] })),
+      // Non-monthly subscriptions (Quarterly/Semi-Annual/Annual) only count toward this
+      // month's bills/Safe-to-Spend when they're actually due this month — otherwise a
+      // once-a-year charge would wrongly look like it's owed every single month.
+      ...data.subscriptions.filter(s => s.active && subDueInMonth(s, now.getFullYear(), now.getMonth() + 1)).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: s.dayOfMonth, person: s.person, category: s.category, paid: !!paidForMonth[s.id] })),
     ];
     const upcomingBillsRemaining = recurringItems.filter(b => b.dayOfMonth > todayDay && !b.paid).reduce((s, b) => s + b.amount, 0);
     const checkingAccount = data.accounts.find(a => a.type === "checking");
@@ -3199,11 +3199,26 @@ function Transactions({ data, actions }) {
 
 const CADENCE_OPTIONS = ["Monthly", "Quarterly", "Semi-Annual", "Annual"];
 const CADENCE_PER_YEAR = { Monthly: 12, Quarterly: 4, "Semi-Annual": 2, Annual: 1 };
-const CADENCE_SUFFIX = { Monthly: "/mo", Quarterly: "/qtr", "Semi-Annual": "/6mo", Annual: "/yr" };
+const CADENCE_SUFFIX = { Monthly: "/mo", Quarterly: "/qtr", "Semi-Annual": " (semi-annual)", Annual: "/yr" };
 
 function subCadence(s) { return s.cadence || "Monthly"; }
 function subYearlyAmount(s) { return s.amount * (CADENCE_PER_YEAR[subCadence(s)] || 12); }
 function subMonthlyEquivalent(s) { return subYearlyAmount(s) / 12; }
+
+// Whether a subscription actually bills in a given calendar month. Monthly ones always do.
+// Quarterly/Semi-Annual/Annual ones only recur every 3/6/12 months from their last billed
+// date (from priceHistory), so e.g. an Annual subscription last charged in April should only
+// show on the calendar in April of each year — not every month.
+function subDueInMonth(s, year, month) {
+  const cadence = subCadence(s);
+  if (cadence === "Monthly") return true;
+  const last = s.priceHistory && s.priceHistory.length ? s.priceHistory[s.priceHistory.length - 1].date : null;
+  if (!last) return true;
+  const [ly, lm] = last.split("-").map(Number);
+  const interval = cadence === "Quarterly" ? 3 : cadence === "Semi-Annual" ? 6 : 12;
+  const monthsDiff = (year - ly) * 12 + (month - lm);
+  return ((monthsDiff % interval) + interval) % interval === 0;
+}
 
 function subscriptionScheduleLabel(s) {
   const cadence = subCadence(s);
@@ -3551,7 +3566,7 @@ function CashFlow({ data, derived, actions }) {
   const paidForViewMonth = (data.paidBills && data.paidBills[viewMonthKey]) || {};
   const items = [
     ...(data.recurringBills || []).map(b => ({ id: b.id, merchant: b.merchant, amount: b.amount, dayOfMonth: Math.min(b.dayOfMonth, dimView), category: b.category, paid: !!paidForViewMonth[b.id], income: false })),
-    ...data.subscriptions.filter(s => s.active).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: Math.min(s.dayOfMonth, dimView), category: s.category, paid: !!paidForViewMonth[s.id], income: false })),
+    ...data.subscriptions.filter(s => s.active && subDueInMonth(s, viewYear, viewMonth)).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: Math.min(s.dayOfMonth, dimView), category: s.category, paid: !!paidForViewMonth[s.id], income: false })),
     ...data.transactions.filter(t => t.category === "Income" && monthKey(t.date) === viewMonthKey).map(t => ({ merchant: t.merchant, amount: t.amount, dayOfMonth: new Date(t.date + "T00:00:00").getDate(), income: true })),
   ];
 
