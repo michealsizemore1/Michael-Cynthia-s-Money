@@ -673,7 +673,7 @@ function generateSeedData() {
 // the Michael & Cynthia sample dataset lingers; the real imported registers are re-applied
 // on top of this by ensureCindyRegister/ensureHouseholdRegisters right after.
 function emptyData() {
-  return { accounts: [], transactions: [], budgets: {}, subscriptions: [], goals: [], netWorthHistory: [], recurringBills: [], rules: [], investments: [], paidBills: {}, customCategories: [] };
+  return { accounts: [], transactions: [], budgets: {}, subscriptions: [], goals: [], netWorthHistory: [], recurringBills: [], rules: [], investments: [], paidBills: {}, customCategories: [], calendarEvents: [] };
 }
 
 /* ---- Cindy's Credit Card Register -------------------------------------
@@ -3451,6 +3451,60 @@ function Subscriptions({ data, actions }) {
 
 /* ============================== CASH FLOW ============================== */
 
+function CalendarEventModal({ open, onClose, onSave, onDelete, initial, defaultDate }) {
+  const blank = { title: "", date: defaultDate || todayISO(), amount: "", notes: "" };
+  const [form, setForm] = useState(blank);
+
+  useEffect(() => {
+    if (!open) return;
+    setForm(initial ? {
+      title: initial.title || "", date: initial.date || todayISO(),
+      amount: initial.amount != null ? String(initial.amount) : "", notes: initial.notes || "",
+    } : { title: "", date: defaultDate || todayISO(), amount: "", notes: "" });
+  }, [open, initial, defaultDate]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.title || !form.date) return;
+    const amount = form.amount === "" ? null : (parseFloat(form.amount) || 0);
+    if (initial) {
+      onSave({ ...initial, title: form.title, date: form.date, amount, notes: form.notes });
+    } else {
+      onSave({ id: uid(), title: form.title, date: form.date, amount, notes: form.notes });
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial ? "Edit Calendar Note" : "Add to Calendar"}>
+      <form onSubmit={submit}>
+        <Field label="Title">
+          <input className={inputClass} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Vet appointment" required />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Date">
+            <input type="date" className={inputClass} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
+          </Field>
+          <Field label="Amount (optional)">
+            <input type="number" step="0.01" className={inputClass} placeholder="Leave blank for a note" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Notes (optional)">
+          <textarea className={inputClass} rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+        </Field>
+        <div className="flex justify-between gap-2 mt-4">
+          {initial && onDelete ? (
+            <Button variant="danger" type="button" onClick={() => onDelete(initial.id)}>Delete</Button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
+            <Button type="submit">{initial ? "Save Changes" : "Add to Calendar"}</Button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function BillCalendar({ year, month, items, todayDay, onDayClick }) {
   const dim = daysInMonth(year, month);
   const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -3478,11 +3532,15 @@ function BillCalendar({ year, month, items, todayDay, onDayClick }) {
               {d && dayItems.slice(0, 3).map((it, idx) => (
                 <div
                   key={idx}
-                  title={it.merchant + " · " + fmtCurrency(it.amount) + (it.paid ? " · Paid" : "")}
-                  className={"mt-0.5 truncate rounded px-1 py-0.5 flex items-center gap-0.5 " + (it.income ? "bg-emerald-50 text-emerald-700" : it.paid ? "bg-slate-100 text-slate-400 line-through" : "bg-rose-50 text-rose-700")}
+                  title={it.merchant + (it.isNote ? (it.amount ? " · " + fmtCurrency(it.amount) : "") + (it.notes ? " · " + it.notes : "") : " · " + fmtCurrency(it.amount) + (it.paid ? " · Paid" : ""))}
+                  className={"mt-0.5 truncate rounded px-1 py-0.5 flex items-center gap-0.5 " + (it.isNote ? "bg-indigo-50 text-indigo-700" : it.income ? "bg-emerald-50 text-emerald-700" : it.paid ? "bg-slate-100 text-slate-400 line-through" : "bg-rose-50 text-rose-700")}
                 >
-                  {!it.income && it.paid && <span className="shrink-0">✓</span>}
-                  <span className="truncate">{it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant}</span>
+                  {!it.isNote && !it.income && it.paid && <span className="shrink-0">✓</span>}
+                  {it.isNote ? (
+                    <span className="truncate">📌 {it.amount ? fmtCurrency(it.amount) + " " : ""}{it.merchant}</span>
+                  ) : (
+                    <span className="truncate">{it.income ? "+" : "-"}${Math.round(Math.abs(it.amount))} {it.merchant}</span>
+                  )}
                 </div>
               ))}
               {d && dayItems.length > 3 && (
@@ -3496,12 +3554,14 @@ function BillCalendar({ year, month, items, todayDay, onDayClick }) {
   );
 }
 
-function DayDetailModal({ open, onClose, day, items, monthKey, actions }) {
+function DayDetailModal({ open, onClose, day, items, monthKey, actions, onAddNote, onEditNote }) {
   if (!day) return null;
-  const bills = items.filter(it => !it.income);
-  const income = items.filter(it => it.income);
+  const notes = items.filter(it => it.isNote);
+  const bills = items.filter(it => !it.income && !it.isNote);
+  const income = items.filter(it => it.income && !it.isNote);
   const [labelYear, labelMonth] = (monthKey || "").split("-").map(Number);
   const dateLabel = day && labelYear ? new Date(labelYear, labelMonth - 1, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : "";
+  const isoDay = labelYear ? isoDate(labelYear, labelMonth, day) : null;
   return (
     <Modal open={open} onClose={onClose} title={dateLabel}>
       <div className="space-y-4">
@@ -3543,6 +3603,27 @@ function DayDetailModal({ open, onClose, day, items, monthKey, actions }) {
             </div>
           </div>
         )}
+        <div>
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Notes &amp; Events</div>
+          {notes.length > 0 && (
+            <div className="space-y-2 mb-2">
+              {notes.map((n, i) => (
+                <div key={n.id || i} className="flex items-center justify-between gap-3 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-700 truncate">📌 {n.merchant}</div>
+                    {n.notes && <div className="text-xs text-slate-400 truncate">{n.notes}</div>}
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {n.amount != null && n.amount !== 0 && <div className="text-sm font-semibold text-slate-600">{fmtCurrency(n.amount)}</div>}
+                    <button type="button" className="text-xs text-indigo-600 font-medium" onClick={() => onEditNote(n)}>Edit</button>
+                    <button type="button" className="text-xs text-rose-500 font-medium" onClick={() => actions.deleteCalendarEvent(n.id)}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button type="button" className="text-xs text-indigo-600 font-medium" onClick={() => onAddNote(isoDay)}>+ Add note to this day</button>
+        </div>
       </div>
     </Modal>
   );
@@ -3554,6 +3635,9 @@ function CashFlow({ data, derived, actions }) {
   const [viewYear, setViewYear] = useState(CASHFLOW_REAL_TODAY.year);
   const [viewMonth, setViewMonth] = useState(CASHFLOW_REAL_TODAY.month);
   const [selectedDay, setSelectedDay] = useState(null);
+  const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState(null);
+  const [noteDefaultDate, setNoteDefaultDate] = useState(null);
 
   const isCurrentMonth = viewYear === CASHFLOW_REAL_TODAY.year && viewMonth === CASHFLOW_REAL_TODAY.month;
   const todayDay = isCurrentMonth ? CASHFLOW_REAL_TODAY.day : -1;
@@ -3568,7 +3652,28 @@ function CashFlow({ data, derived, actions }) {
     ...(data.recurringBills || []).map(b => ({ id: b.id, merchant: b.merchant, amount: b.amount, dayOfMonth: Math.min(b.dayOfMonth, dimView), category: b.category, paid: !!paidForViewMonth[b.id], income: false })),
     ...data.subscriptions.filter(s => s.active && subDueInMonth(s, viewYear, viewMonth)).map(s => ({ id: s.id, merchant: s.merchant, amount: s.amount, dayOfMonth: Math.min(s.dayOfMonth, dimView), category: s.category, paid: !!paidForViewMonth[s.id], income: false })),
     ...data.transactions.filter(t => t.category === "Income" && monthKey(t.date) === viewMonthKey).map(t => ({ merchant: t.merchant, amount: t.amount, dayOfMonth: new Date(t.date + "T00:00:00").getDate(), income: true })),
+    // User-added calendar notes/events — purely informational, so they don't feed into
+    // Safe-to-Spend or "Still due this month" the way bills/subscriptions do.
+    ...(data.calendarEvents || []).filter(e => monthKey(e.date) === viewMonthKey).map(e => ({
+      id: e.id, merchant: e.title, amount: e.amount, notes: e.notes,
+      dayOfMonth: Math.min(new Date(e.date + "T00:00:00").getDate(), dimView),
+      paid: false, income: false, isNote: true,
+    })),
   ];
+
+  const openAddNote = (date) => { setEditingNote(null); setNoteDefaultDate(date || todayISO()); setNoteModalOpen(true); };
+  const openEditNote = (n) => {
+    const original = (data.calendarEvents || []).find(e => e.id === n.id);
+    setEditingNote(original || null);
+    setNoteModalOpen(true);
+  };
+  const closeNoteModal = () => setNoteModalOpen(false);
+  const saveNote = (e) => {
+    if (editingNote) actions.updateCalendarEvent(e);
+    else actions.addCalendarEvent(e);
+    setNoteModalOpen(false);
+  };
+  const deleteNote = (id) => { actions.deleteCalendarEvent(id); setNoteModalOpen(false); };
 
   // "Still due this month" and Safe to Spend always reflect the real current month,
   // regardless of which month the calendar above is browsing.
@@ -3592,9 +3697,12 @@ function CashFlow({ data, derived, actions }) {
 
   return (
     <div className="p-4 md:p-8 space-y-5 md:space-y-6">
-      <div>
-        <h1 className="text-xl md:text-2xl font-bold text-slate-800">Cash Flow</h1>
-        <p className="text-slate-500 text-sm mt-1">What's safe to spend before your next bills hit, and when everything is due.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800">Cash Flow</h1>
+          <p className="text-slate-500 text-sm mt-1">What's safe to spend before your next bills hit, and when everything is due.</p>
+        </div>
+        <Button variant="secondary" className="shrink-0" onClick={() => openAddNote()}>+ Add to Calendar</Button>
       </div>
 
       <SectionNotes section="cashflow" data={data} actions={actions} />
@@ -3651,6 +3759,17 @@ function CashFlow({ data, derived, actions }) {
         items={selectedItems}
         monthKey={viewMonthKey}
         actions={actions}
+        onAddNote={openAddNote}
+        onEditNote={openEditNote}
+      />
+
+      <CalendarEventModal
+        open={noteModalOpen}
+        onClose={closeNoteModal}
+        onSave={saveNote}
+        onDelete={deleteNote}
+        initial={editingNote}
+        defaultDate={noteDefaultDate}
       />
     </div>
   );
@@ -4500,6 +4619,10 @@ function App() {
         return match ? { ...t, category: match.category } : t;
       }),
     })),
+
+    addCalendarEvent: (e) => setData(d => ({ ...d, calendarEvents: [...(d.calendarEvents || []), e] })),
+    updateCalendarEvent: (e) => setData(d => ({ ...d, calendarEvents: (d.calendarEvents || []).map(x => x.id === e.id ? e : x) })),
+    deleteCalendarEvent: (id) => setData(d => ({ ...d, calendarEvents: (d.calendarEvents || []).filter(x => x.id !== id) })),
 
     resetDemo: () => { setData(ensureUserNamedSubscriptions(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(emptyData()))))); },
     restoreData: (newData) => { setData(ensureUserNamedSubscriptions(ensureDiscoverRegister(ensureHouseholdRegisters(ensureCindyRegister(newData))))); },
