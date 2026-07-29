@@ -2908,6 +2908,8 @@ function Transactions({ data, actions }) {
   const [sectionOpen, setSectionOpen] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [markingSub, setMarkingSub] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkMoveAccountId, setBulkMoveAccountId] = useState("");
 
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
@@ -2928,6 +2930,29 @@ function Transactions({ data, actions }) {
   }, [data.transactions, search, catFilter, acctFilter, personFilter]);
 
   const accountsById = Object.fromEntries(data.accounts.map(a => [a.id, a]));
+
+  const visibleIds = filtered.slice(0, limit).map(t => t.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  const toggleSelectOne = (id) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleSelectAllVisible = () => setSelectedIds(prev => {
+    if (allVisibleSelected) {
+      const next = new Set(prev);
+      visibleIds.forEach(id => next.delete(id));
+      return next;
+    }
+    return new Set([...prev, ...visibleIds]);
+  });
+  const clearSelection = () => setSelectedIds(new Set());
+  const applyBulkMove = () => {
+    if (!bulkMoveAccountId || selectedIds.size === 0) return;
+    actions.reassignTransactionsAccount([...selectedIds], bulkMoveAccountId);
+    setSelectedIds(new Set());
+    setBulkMoveAccountId("");
+  };
 
   const openAdd = (accountId) => { setEditing(null); setPresetAccountId(accountId || null); setModalOpen(true); };
   const openEdit = (t) => { setEditing(t); setPresetAccountId(null); setModalOpen(true); };
@@ -2995,12 +3020,30 @@ function Transactions({ data, actions }) {
         )}
       </Card>
 
+      {selectedIds.size > 0 && (
+        <Card className="p-4 flex flex-wrap gap-3 items-center bg-indigo-50/60 border-indigo-200">
+          <span className="text-sm font-medium text-indigo-700">{selectedIds.size} selected</span>
+          <select className={inputClass + " max-w-[220px]"} value={bulkMoveAccountId} onChange={e => setBulkMoveAccountId(e.target.value)}>
+            <option value="">Move to account…</option>
+            {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <Button disabled={!bulkMoveAccountId} onClick={applyBulkMove}>Move {selectedIds.size} transaction{selectedIds.size === 1 ? "" : "s"}</Button>
+          <button className="text-xs text-slate-500 font-medium" onClick={clearSelection}>Clear selection</button>
+        </Card>
+      )}
+
       <Card className="overflow-hidden">
         {filtered.length > 0 && (
-          <div className="md:hidden flex items-center justify-end gap-3 px-5 py-2 border-b border-slate-100">
-            <button type="button" className="text-xs text-indigo-600 font-medium" onClick={() => expandAll(filtered.slice(0, limit).map(t => t.id))}>Expand all</button>
-            <span className="text-slate-300">|</span>
-            <button type="button" className="text-xs text-slate-500 font-medium" onClick={collapseAll}>Collapse all</button>
+          <div className="flex items-center justify-between gap-3 px-5 py-2 border-b border-slate-100">
+            <label className="flex items-center gap-2 text-xs text-slate-500 font-medium cursor-pointer">
+              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
+              Select all {visibleIds.length} shown
+            </label>
+            <div className="md:hidden flex items-center gap-3">
+              <button type="button" className="text-xs text-indigo-600 font-medium" onClick={() => expandAll(filtered.slice(0, limit).map(t => t.id))}>Expand all</button>
+              <span className="text-slate-300">|</span>
+              <button type="button" className="text-xs text-slate-500 font-medium" onClick={collapseAll}>Collapse all</button>
+            </div>
           </div>
         )}
         {/* Mobile: collapsible stacked cards */}
@@ -3009,28 +3052,31 @@ function Transactions({ data, actions }) {
             const isOpen = expandedIds.has(t.id);
             return (
               <div key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => toggleExpand(t.id)}
-                  className="w-full flex items-center justify-between gap-2 px-5 py-4 text-left hover:bg-slate-50"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <MerchantAvatar merchant={t.merchant} category={t.category} size={30} />
-                    <div className="min-w-0">
-                      <div className="font-semibold text-slate-800 truncate flex items-center gap-1.5">
-                        {t.merchant}
-                        {t.receipt && <span title="Has receipt">📎</span>}
+                <div className="flex items-center gap-1 px-2 hover:bg-slate-50">
+                  <input type="checkbox" className="shrink-0 ml-1" checked={selectedIds.has(t.id)} onChange={() => toggleSelectOne(t.id)} onClick={e => e.stopPropagation()} />
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(t.id)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-4 text-left"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <MerchantAvatar merchant={t.merchant} category={t.category} size={30} />
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                          {t.merchant}
+                          {t.receipt && <span title="Has receipt">📎</span>}
+                        </div>
+                        <div className="text-xs text-slate-400">{fmtDate(t.date)}</div>
                       </div>
-                      <div className="text-xs text-slate-400">{fmtDate(t.date)}</div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={"font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
-                      {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
-                    </span>
-                    <span className={"text-slate-400 inline-block transition-transform " + (isOpen ? "rotate-180" : "")}>▾</span>
-                  </div>
-                </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={"font-semibold " + (t.amount > 0 ? "text-emerald-600" : "text-slate-700")}>
+                        {t.amount > 0 ? "+" : ""}{fmtCurrency(t.amount)}
+                      </span>
+                      <span className={"text-slate-400 inline-block transition-transform " + (isOpen ? "rotate-180" : "")}>▾</span>
+                    </div>
+                  </button>
+                </div>
                 {isOpen && (
                   <div className="px-5 pb-4">
                     <div className="space-y-1.5 text-sm pl-1">
@@ -3083,6 +3129,7 @@ function Transactions({ data, actions }) {
           <table className="w-full text-sm min-w-[820px]">
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
               <tr>
+                <th className="px-5 py-3 w-8"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} /></th>
                 <th className="text-left px-5 py-3 font-medium">Merchant</th>
                 <th className="text-left px-5 py-3 font-medium">Category</th>
                 <th className="text-left px-5 py-3 font-medium">Person</th>
@@ -3095,6 +3142,7 @@ function Transactions({ data, actions }) {
             <tbody>
               {filtered.slice(0, limit).map(t => (
                 <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50 group">
+                  <td className="px-5 py-3"><input type="checkbox" checked={selectedIds.has(t.id)} onChange={() => toggleSelectOne(t.id)} /></td>
                   <td className="px-5 py-3 font-medium text-slate-700">
                     <div className="flex items-center gap-2">
                       <MerchantAvatar merchant={t.merchant} category={t.category} size={26} />
@@ -3119,7 +3167,7 @@ function Transactions({ data, actions }) {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan="7" className="text-center py-10 text-slate-400">No transactions match your filters.</td></tr>
+                <tr><td colSpan="8" className="text-center py-10 text-slate-400">No transactions match your filters.</td></tr>
               )}
             </tbody>
           </table>
@@ -4379,6 +4427,10 @@ function App() {
     addTransaction: (t) => setData(d => ({ ...d, transactions: [t, ...d.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)) })),
     updateTransaction: (t) => setData(d => ({ ...d, transactions: d.transactions.map(x => x.id === t.id ? t : x) })),
     deleteTransaction: (id) => setData(d => ({ ...d, transactions: d.transactions.filter(x => x.id !== id) })),
+    reassignTransactionsAccount: (ids, accountId) => setData(d => {
+      const idSet = new Set(ids);
+      return { ...d, transactions: d.transactions.map(t => idSet.has(t.id) ? { ...t, accountId } : t) };
+    }),
     importTransactions: (arr) => setData(d => ({ ...d, transactions: [...arr, ...d.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)) })),
 
     toggleBillPaid: (monthKey, id) => setData(d => {
